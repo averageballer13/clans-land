@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { buildEarthMaps } from './earthTexture.js'
+import { buildEarthMap } from './earthTexture.js'
 import { CLANS, buildTiles } from '../lib/world.js'
 
 const R = 1
@@ -124,18 +124,18 @@ export default function Globe({ onHover, onPick, focus, paused }) {
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.45
+    renderer.toneMappingExposure = 1.1
 
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100)
     camera.position.set(0, 0, 3.05)
 
     /* ---- lighting: one warm key (the sun), one cold fill ---- */
-    const sun = new THREE.DirectionalLight(0xfff2e2, 2.5)
+    const sun = new THREE.DirectionalLight(0xfff2e2, 1.35)
     sun.position.set(-2.2, 1.1, 2.4)
     scene.add(sun)
-    scene.add(new THREE.AmbientLight(0x3d4653, 1.15))
-    const rim = new THREE.DirectionalLight(0xff7a1a, 0.7)
+    scene.add(new THREE.AmbientLight(0xb8c4d4, 2.1))
+    const rim = new THREE.DirectionalLight(0xff7a1a, 0.55)
     rim.position.set(2.6, -0.8, -2)
     scene.add(rim)
 
@@ -157,8 +157,8 @@ export default function Globe({ onHover, onPick, focus, paused }) {
     const world = new THREE.Group()
     scene.add(world)
 
-    const earthMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.06 })
-    const earth = new THREE.Mesh(new THREE.SphereGeometry(R, 160, 96), earthMat)
+    const earthMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 })
+    const earth = new THREE.Mesh(new THREE.SphereGeometry(R, 96, 64), earthMat)
     world.add(earth)
 
     /* ---- atmosphere: inner haze + outer bloom ---- */
@@ -166,7 +166,7 @@ export default function Globe({ onHover, onPick, focus, paused }) {
       new THREE.SphereGeometry(R * 1.012, 96, 64),
       new THREE.ShaderMaterial({
         vertexShader: ATMO_VERT, fragmentShader: ATMO_FRAG,
-        uniforms: { uColor: { value: new THREE.Color(0xff8a3c) }, uPower: { value: 6.0 }, uStrength: { value: 0.8 } },
+        uniforms: { uColor: { value: new THREE.Color(0xff8a3c) }, uPower: { value: 5.0 }, uStrength: { value: 0.42 } },
         transparent: true, blending: THREE.AdditiveBlending, side: THREE.FrontSide, depthWrite: false,
       })
     )
@@ -181,9 +181,9 @@ export default function Globe({ onHover, onPick, focus, paused }) {
     const hg = hx.createRadialGradient(256, 256, 0, 256, 256, 256)
     hg.addColorStop(0, 'rgba(255,122,26,0)')
     hg.addColorStop(0.575, 'rgba(255,122,26,0)')
-    hg.addColorStop(0.60, 'rgba(255,110,20,0.42)')
-    hg.addColorStop(0.70, 'rgba(255,90,8,0.16)')
-    hg.addColorStop(0.85, 'rgba(170,52,0,0.05)')
+    hg.addColorStop(0.60, 'rgba(255,110,20,0.26)')
+    hg.addColorStop(0.70, 'rgba(255,90,8,0.10)')
+    hg.addColorStop(0.85, 'rgba(255,72,0,0.03)')
     hg.addColorStop(1, 'rgba(0,0,0,0)')
     hx.fillStyle = hg
     hx.fillRect(0, 0, 512, 512)
@@ -231,28 +231,19 @@ export default function Globe({ onHover, onPick, focus, paused }) {
       capitals.add(halo)
     }
 
-    /* ---- textures ---- */
+    /* ---- texture ---- */
     let disposed = false
     fetch('/data/earth.json')
       .then((r) => r.json())
       .then((geo) => {
         if (disposed) return
-        const size = Math.min(renderer.capabilities.maxTextureSize, innerWidth > 1100 ? 4096 : 2048)
-        const { colour, bump, rough } = buildEarthMaps(geo, size)
-        const mk = (cv, srgb) => {
-          const t = new THREE.CanvasTexture(cv)
-          t.anisotropy = renderer.capabilities.getMaxAnisotropy()
-          if (srgb) t.colorSpace = THREE.SRGBColorSpace
-          t.needsUpdate = true
-          return t
-        }
-        earthMat.map = mk(colour, true)
-        earthMat.bumpMap = mk(bump, false)
-        earthMat.bumpScale = 0.014
-        earthMat.roughnessMap = mk(rough, false)
+        const size = Math.min(renderer.capabilities.maxTextureSize, 2048)
+        const tex = new THREE.CanvasTexture(buildEarthMap(geo, size))
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy()
+        tex.colorSpace = THREE.SRGBColorSpace
+        earthMat.map = tex
         earthMat.needsUpdate = true
         api.current.ready = true
-        canvas.dispatchEvent(new CustomEvent('globeready', { bubbles: true }))
       })
       .catch(() => { api.current.ready = true })
 

@@ -23,12 +23,23 @@ export const LAUNCHPAD = {
   tokenUrl: 'https://opensea.io/token/robinhood/0x39dbed3a2bd333467115de45665cc57f813c4571',
 }
 
+export const SITE = {
+  name: 'Clans',
+  tld: '.land',
+  domain: 'clans.land',
+}
+
 export const TOKEN = {
   symbol: 'CLANS',
-  name: 'Pons Clans',
-  address: '0x0000000000000000000000000000000000000000',
+  name: 'Clans.land',
+  // Not deployed yet — the launch happens on Pons.
+  address: null,
   url: LAUNCHPAD.site,
 }
+
+// The wallet that deploys $CLANS and holds the creator vault on Pons.
+export const DEV_WALLET = '0x3690589E41C7705AC65BD456202fe936B55420A0'
+export const shortAddr = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '—')
 
 export const WALLETS = [
   { id: 'metamask', name: 'MetaMask', logo: '/brand/wallet/metamask.jpg' },

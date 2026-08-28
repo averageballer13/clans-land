@@ -1,11 +1,15 @@
-# Pons Clans
+# Clans.land
 
 **The World of SocialFi on Robinhood Chain.** Social trading as a competitive game:
 wallets form clans, clans take land on a shared globe, clan coins launched on **Pons**
 earn the creator rewards, and timed wars settle the rest.
 
 Same product idea and same art direction as the original `pfclans.fun`, rebuilt for
-Robinhood Chain with a pro black / orange theme and a far more detailed Earth.
+Robinhood Chain in a pro black / orange theme.
+
+**The world ships empty.** No clans, no land taken, no wars, no bounties, no token
+deployed — genesis state, exactly as it will look the moment it goes live. The first
+clan founded is genuinely the first clan.
 
 ---
 
@@ -13,30 +17,27 @@ Robinhood Chain with a pro black / orange theme and a far more detailed Earth.
 
 | Section | What it does |
 | --- | --- |
-| World map | Globe overview, capitals, land claimed out of 1200 tiles |
+| World map | Globe overview, capitals, land claimed out of 1200 tiles (0 at genesis) |
 | Found a clan | Live crest designer — silhouette, field, charge, inks |
 | Clan directory | All clans, entry mode, join / request |
 | Bounties | Recruiting, crest art, research, open calls |
 | Wars | Live fronts scored in net ETH, settled history |
 | Leaderboard | Trophies / land / profit / creator rewards |
-| Official token | `$CLANS` on Pons, plus every live clan coin |
+| Official token | `$CLANS` on Pons — not deployed yet, deployer wallet shown |
 | Rules · Terms | The full ruleset and terms of use |
 
 ## The globe
 
-Rendered in three.js from **Natural Earth 1:50m** vectors, baked at load into three
-equirectangular maps on a canvas (`src/globe/earthTexture.js`):
-
-- **colour** — layered ocean gradient with depth banding, continental shelf halo,
-  land with a latitude gradient, lakes, dashed political borders, 15° graticule,
-  and a two-pass coastline (wide glow, then a hairline in orange)
-- **bump** — land mask with relief noise, so continents catch the light
-- **roughness** — glossier sea, matte land
+Rendered in three.js from **Natural Earth 1:110m** land, baked at load into a single
+equirectangular canvas (`src/globe/earthTexture.js`). Deliberately graphic rather than
+cartographic: flat ocean, flat land, one hairline orange coast, a faint 30° graticule.
+Nothing on the map competes with the clans.
 
 On top of the sphere: a tight atmospheric rim shader, a hollow radial halo sprite
 (a second shader shell peaks at its own limb and reads as a hard ring), 2 600 stars,
 clan land as a low additive tint plus crisp territory edges, and capital markers that
-breathe. Drag to rotate, wheel to zoom, hover a tile for its clan.
+breathe. Drag to rotate, wheel to zoom, hover a tile — unclaimed ground reports its
+coordinates, claimed ground reports its clan.
 
 ## Clan crests
 

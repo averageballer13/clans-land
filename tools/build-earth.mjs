@@ -1,7 +1,8 @@
-// Compacts Natural Earth GeoJSON into a single small payload for the globe texture.
+// Compacts Natural Earth GeoJSON into a small payload for the globe texture.
+// 1:110m on purpose: the globe should read as a clean graphic map, not a survey.
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 
-const R = (n) => Math.round(n * 1000) / 1000
+const R = (n) => Math.round(n * 100) / 100
 
 function rings(geom) {
   const out = []
@@ -22,17 +23,9 @@ function rings(geom) {
   return out
 }
 
-const load = (f) => JSON.parse(readFileSync(`public/data/${f}`, 'utf8')).features
+const src = 'public/data/land110.json'
+const land = JSON.parse(readFileSync(src, 'utf8')).features.flatMap((f) => rings(f.geometry))
 
-const land = load('land50.json').flatMap((f) => rings(f.geometry))
-const borders = load('borders.json').flatMap((f) => rings(f.geometry))
-const lakes = load('lakes.json')
-  .filter((f) => (f.properties.scalerank ?? 9) <= 3)
-  .flatMap((f) => rings(f.geometry))
-
-const payload = { land, borders, lakes }
-writeFileSync('public/data/earth.json', JSON.stringify(payload))
-for (const f of ['land50.json', 'borders.json', 'lakes.json']) {
-  try { unlinkSync(`public/data/${f}`) } catch {}
-}
-console.log('land rings', land.length, 'borders', borders.length, 'lakes', lakes.length)
+writeFileSync('public/data/earth.json', JSON.stringify({ land }))
+try { unlinkSync(src) } catch {}
+console.log('land rings', land.length)

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import Crest from '../ui/Crest.jsx'
-import { CHAIN, LAUNCHPAD, TOKEN, WORLD_TILES, CLAN_MAX } from '../lib/brand.js'
+import { CHAIN, LAUNCHPAD, TOKEN, DEV_WALLET, shortAddr, WORLD_TILES, CLAN_MAX } from '../lib/brand.js'
 import {
   CLANS, clanBy, membersOf, LIVE_WARS, SETTLED_WARS, BOUNTIES,
   TOTAL_LAND, CLAIMED_PCT, WALLETS_LIVE, CREST_SHAPES, CREST_FIELDS,
@@ -25,6 +25,24 @@ function Spark({ seed, w = 74, h = 26, color = 'var(--acc)' }) {
   )
 }
 
+/* Every list ships empty at genesis, so each one says what would fill it
+   and what the visitor can do about it right now. */
+function Empty({ title, copy, action, onAction }) {
+  return (
+    <div className="empty">
+      <div className="empty-mark" aria-hidden="true">
+        <svg width="34" height="34" viewBox="0 0 34 34">
+          <circle cx="17" cy="17" r="15" fill="none" stroke="currentColor" strokeWidth="1" />
+          <path d="M2 17h30M17 2c5 5 5 25 0 30M17 2c-5 5-5 25 0 30" fill="none" stroke="currentColor" strokeWidth="1" />
+        </svg>
+      </div>
+      <div className="empty-title">{title}</div>
+      <p className="empty-copy">{copy}</p>
+      {action && <button className="btn small solid" onClick={onAction}>{action}</button>}
+    </div>
+  )
+}
+
 function Chain() {
   return (
     <span className="chainpill">
@@ -45,7 +63,9 @@ export function WorldMap({ go }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
         <Chain />
         <span className="chainpill"><img src={LAUNCHPAD.logo} alt="" /> Coins on <b>{LAUNCHPAD.name}</b></span>
-        <span className="feedpill live"><i className="dot" /> Chain feed live</span>
+        <span className={`feedpill ${CLANS.length ? 'live' : 'snap'}`}>
+          <i className="dot" /> {CLANS.length ? 'Chain feed live' : 'Genesis · nothing claimed'}
+        </span>
       </div>
       <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.62, marginBottom: 16 }}>
         The map is the prize. Every clan holds land — 6 tiles for the banner plus 3 per member —
@@ -54,6 +74,14 @@ export function WorldMap({ go }) {
       </p>
       <hr className="hr" />
       <div className="lbl" style={{ padding: '14px 0 6px' }}>Capitals</div>
+      {CLANS.length === 0 && (
+        <Empty
+          title="No capital has been planted"
+          copy={`All ${WORLD_TILES} tiles are open. The first clan founded picks anywhere on the map and paints outward from there.`}
+          action="Found the first clan"
+          onAction={() => go('found')}
+        />
+      )}
       {CLANS.map((c) => (
         <div className="dirrow" key={c.id} onClick={() => go('clan', c.id)}>
           <Crest tag={c.tag} spec={c.crest} size={30} />
@@ -82,6 +110,14 @@ export function Directory({ go, toast }) {
         </div>
         <button className="btn small solid" style={{ marginLeft: 14 }} onClick={() => go('found')}>Found a clan</button>
       </div>
+      {list.length === 0 && (
+        <Empty
+          title="No clans yet"
+          copy="Nobody has founded one. Pick a crest, a tag and an entry rule, and you hold the first banner on the map."
+          action="Found a clan"
+          onAction={() => go('found')}
+        />
+      )}
       {list.map((c) => (
         <div className="dirrow" key={c.id} onClick={() => go('clan', c.id)}>
           <Crest tag={c.tag} spec={c.crest} size={40} />
@@ -131,6 +167,14 @@ export function Leaderboard({ go }) {
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
+      {sorted.length === 0 && (
+        <Empty
+          title="Nothing to rank"
+          copy="Trophies come from wars, land from members, rewards from a clan coin's creator vault on Pons. None of it exists yet."
+          action="Found a clan"
+          onAction={() => go('found')}
+        />
+      )}
       {sorted.map((c, i) => (
         <div className="lb-row" key={c.id} onClick={() => go('clan', c.id)}>
           <span className={`lb-rank r${i + 1}`}>{i + 1}</span>
@@ -169,6 +213,14 @@ export function Wars({ go }) {
         pays the land.
       </p>
       <div className="lbl" style={{ padding: '10px 0 2px' }}>Live fronts</div>
+      {LIVE_WARS.length === 0 && (
+        <Empty
+          title="All quiet"
+          copy="No war can be declared until there are two clans to declare one."
+          action="Found a clan"
+          onAction={() => go('found')}
+        />
+      )}
       {LIVE_WARS.map((w) => {
         const a = clanBy(w.a), b = clanBy(w.b)
         const total = Math.abs(w.sa) + Math.abs(w.sb) || 1
@@ -194,7 +246,7 @@ export function Wars({ go }) {
           </div>
         )
       })}
-      <div className="lbl" style={{ padding: '18px 0 2px' }}>Recent outcomes</div>
+      {SETTLED_WARS.length > 0 && <div className="lbl" style={{ padding: '18px 0 2px' }}>Recent outcomes</div>}
       {SETTLED_WARS.slice(0, 14).map((w) => {
         const a = clanBy(w.a), b = clanBy(w.b)
         return (
@@ -220,6 +272,14 @@ export function Bounties({ toast }) {
         <span className="lbl">The marketplace: recruiting, crests, trading, open calls</span>
         <button className="btn small solid" onClick={() => toast('Bounty draft saved')}>Post</button>
       </div>
+      {BOUNTIES.length === 0 && (
+        <Empty
+          title="The board is empty"
+          copy={`Post anything you will pay for — wallets recruited, crest art, research — and pay the claimer wallet to wallet in ${CHAIN.gas}. Clans is not an escrow.`}
+          action="Post the first bounty"
+          onAction={() => toast('Bounty draft saved')}
+        />
+      )}
       {BOUNTIES.map((b) => (
         <div className={`bountyrow ${b.state !== 'open' ? 'done' : ''}`} key={b.id}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -247,38 +307,63 @@ export function Bounties({ toast }) {
 
 /* ================= Token ================= */
 export function Token() {
+  const live = CLANS.filter((c) => c.coin)
   return (
     <>
       <div style={{ display: 'flex', gap: 14, alignItems: 'center', margin: '6px 0 14px' }}>
         <img src={LAUNCHPAD.logo} alt="" style={{ width: 46, height: 46, border: '1px solid var(--line)', objectFit: 'contain', background: '#fff' }} />
         <div>
           <div className="num" style={{ fontSize: 18, fontWeight: 600 }}>${TOKEN.symbol}</div>
-          <span className="lbl">Launched on {LAUNCHPAD.name} · {CHAIN.name}</span>
+          <span className="lbl">Launching on {LAUNCHPAD.name} · {CHAIN.name}</span>
         </div>
+        <span className="feedpill snap" style={{ marginLeft: 'auto' }}><i className="dot" /> Not deployed</span>
       </div>
+
       <div className="statrow">
         <div className="stat"><span className="lbl">Chain</span><span className="v">{CHAIN.short}</span></div>
         <div className="stat"><span className="lbl">Launchpad</span><span className="v">{LAUNCHPAD.name}</span></div>
         <div className="stat"><span className="lbl">Supply</span><span className="v">Fixed</span></div>
       </div>
-      <hr className="hr" />
+
+      <div className="kv">
+        <div className="kv-row">
+          <span className="lbl">Contract</span>
+          <span className="num faint">{TOKEN.address ? TOKEN.address : 'not deployed yet'}</span>
+        </div>
+        <div className="kv-row">
+          <span className="lbl">Deployer wallet</span>
+          <span className="chip" style={{ margin: 0 }}>
+            <span className="addr" title={DEV_WALLET}>{shortAddr(DEV_WALLET)}</span>
+            <button className="cta" onClick={() => navigator.clipboard?.writeText(DEV_WALLET)}>Copy</button>
+          </span>
+        </div>
+      </div>
+
       <div className="doc">
         <h3>The official coin</h3>
         <p>
-          ${TOKEN.symbol} is the house coin of this world. It is deployed on <b>{LAUNCHPAD.name}</b>,
-          the launchpad native to <b>{CHAIN.name}</b>: fixed supply, liquidity locked, non custodial.
-          Clans never holds or distributes trading fees — the creator vault belongs to the coin's own
-          creator wallet, exactly as {LAUNCHPAD.name} pays it out.
+          ${TOKEN.symbol} is the house coin of this world. It deploys on <b>{LAUNCHPAD.name}</b>, the
+          launchpad native to <b>{CHAIN.name}</b>: fixed supply, liquidity locked, non custodial.
+          Until it is live there is no contract address — anything claiming to be ${TOKEN.symbol}
+          before it appears here is not ours.
         </p>
         <h3>Clan coins</h3>
         <p>
           Every clan Leader can deploy a clan coin on {LAUNCHPAD.name}. Each trade of it accrues
-          creator fees to that coin's on chain vault. The bigger the clan and the harder its coin
-          trades, the bigger the vault. How a clan shares it is the clan's business.
+          creator fees to that coin's own on chain vault, paid by {LAUNCHPAD.name} itself. Clans
+          never holds or distributes any of it: the vault belongs to the coin's creator wallet, and
+          how a clan shares it is the clan's business.
         </p>
       </div>
+
       <div className="lbl" style={{ padding: '18px 0 4px' }}>Clan coins live</div>
-      {CLANS.filter((c) => c.coin).map((c) => (
+      {live.length === 0 && (
+        <Empty
+          title="No clan coin has been deployed"
+          copy={`The first Leader to launch one on ${LAUNCHPAD.name} opens their creator vault, and it shows up here.`}
+        />
+      )}
+      {live.map((c) => (
         <div className="coinrow" key={c.id}>
           <Crest tag={c.tag} spec={c.crest} size={32} />
           <div className="lb-name">
@@ -286,9 +371,10 @@ export function Token() {
             <div className="t">{c.name} · vault {money(c.coin.vault)}</div>
           </div>
           <div className="lb-val num">{money(c.coin.mcap)}</div>
-          <span className="faint">›</span>
+          <span className="faint">&#8250;</span>
         </div>
       ))}
+
       <div className="chainrow">
         <a className="btn small" href={LAUNCHPAD.site} target="_blank" rel="noreferrer noopener">Open {LAUNCHPAD.name}</a>
         <a className="btn small" href={CHAIN.site} target="_blank" rel="noreferrer noopener">{CHAIN.name}</a>

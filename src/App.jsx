@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Globe from './globe/Globe.jsx'
 import Crest from './ui/Crest.jsx'
-import { CHAIN, LAUNCHPAD, TOKEN, WALLETS, WORLD_TILES } from './lib/brand.js'
-import { CLANS, clanBy, makeTicker, CLAIMED_PCT, TOTAL_LAND, WALLETS_LIVE, LIVE_WARS } from './lib/world.js'
+import { CHAIN, LAUNCHPAD, SITE, TOKEN, WALLETS, WORLD_TILES } from './lib/brand.js'
+import { CLANS, clanBy, crestFor, makeTicker, CLAIMED_PCT, TOTAL_LAND, WALLETS_LIVE, LIVE_WARS, BOUNTIES } from './lib/world.js'
 import { WorldMap, Directory, Leaderboard, Wars, Bounties, Token, Found, ClanDetail, Rules, Terms } from './panels/Panels.jsx'
 
 const NAV = [
   ['world', 'World map', () => `${CLAIMED_PCT}% claimed`],
-  ['found', 'Found a clan', () => ''],
+  ['found', 'Found a clan', () => 'open'],
   ['directory', 'Clan directory', () => String(CLANS.length)],
-  ['bounties', 'Bounties', () => '3 open'],
+  ['bounties', 'Bounties', () => `${BOUNTIES.length} open`],
   ['wars', 'Wars', () => `${LIVE_WARS.length} live`],
   ['leaderboard', 'Leaderboard', () => ''],
   ['token', 'Official token', () => `$${TOKEN.symbol}`],
@@ -26,10 +26,13 @@ const TITLES = {
 const HOW = [
   { t: 'Connect', c: `Bring a wallet to ${CHAIN.name}. Nothing is custodial: the site reads the chain, you sign everything yourself.` },
   { t: 'Form a clan', c: 'Up to 50 wallets under one crest. Leader, Co Leaders, Elders, Members. Open, request, or invite only.' },
-  { t: 'Take land', c: `6 tiles for the banner, 3 more per wallet, painted around your capital. ${WORLD_TILES} tiles in the world, and no more.` },
+  { t: 'Take land', c: `6 tiles for the banner, 3 more per wallet, painted around your capital. ${WORLD_TILES} tiles in the world, all of them still open.` },
   { t: 'Deploy the coin', c: `The Leader launches the clan coin on ${LAUNCHPAD.name}. Every trade accrues creator fees to the coin's own vault.` },
   { t: 'Go to war', c: `One number a side: real net ${CHAIN.gas} made during the window. Winner takes a fifth of the loser's land.` },
 ]
+
+// Illustration only: the walkthrough shows what a crest can look like.
+const DEMO_CRESTS = ['ALPHA', 'BETA', 'GAMMA', 'DELTA'].map(crestFor)
 
 function HowItWorks({ onClose }) {
   const [i, setI] = useState(0)
@@ -39,16 +42,16 @@ function HowItWorks({ onClose }) {
       <div className="howbox">
         <div className="howbrand">
           <img src={CHAIN.logo} alt="" style={{ height: 18 }} />
-          <span className="howword">Clans</span>
+          <span className="howword">{SITE.name}<i className="wm-tld">{SITE.tld}</i></span>
           <span className="lbl" style={{ marginLeft: 'auto' }}>{i + 1} / {HOW.length}</span>
         </div>
         <div className="howscene" key={i}>
           <div className="howart">
             {i === 0 && <><span className="howring" /><span className="howring r2" /><span className="howcore"><img src={CHAIN.logo} alt="" style={{ height: 34 }} /></span><span className="howchip">Self custody</span></>}
-            {i === 1 && <><span className="howshield sm l"><Crest tag="A" spec={CLANS[0].crest} size={44} /></span><span className="howshield sm r"><Crest tag="B" spec={CLANS[1].crest} size={44} /></span><span className="howstream"><i /><i /><i /></span><span className="howchip">50 wallets, one crest</span></>}
+            {i === 1 && <><span className="howshield sm l"><Crest tag="A" spec={DEMO_CRESTS[0]} size={44} /></span><span className="howshield sm r"><Crest tag="B" spec={DEMO_CRESTS[1]} size={44} /></span><span className="howstream"><i /><i /><i /></span><span className="howchip">50 wallets, one crest</span></>}
             {i === 2 && <><span className="howland a" /><span className="howland b" /><span className="howchip">{WORLD_TILES} tiles</span></>}
             {i === 3 && <><span className="howcoin"><img src={LAUNCHPAD.logo} alt="" style={{ height: 44, background: '#fff', border: '1px solid var(--line)' }} /></span><span className="howticket">Creator vault · {LAUNCHPAD.name}</span></>}
-            {i === 4 && <><span className="howshield sm l"><Crest tag="C" spec={CLANS[2].crest} size={40} /></span><span className="howshield sm r"><Crest tag="D" spec={CLANS[3].crest} size={40} /></span><span className="howclash" style={{ fontSize: 26 }}>✕</span><span className="howchip">Winner takes the land</span></>}
+            {i === 4 && <><span className="howshield sm l"><Crest tag="C" spec={DEMO_CRESTS[2]} size={40} /></span><span className="howshield sm r"><Crest tag="D" spec={DEMO_CRESTS[3]} size={40} /></span><span className="howclash" style={{ fontSize: 26 }}>✕</span><span className="howchip">Winner takes the land</span></>}
           </div>
           <div className="howtitle">{s.t}</div>
           <p className="howcopy">{s.c}</p>
@@ -141,10 +144,8 @@ export default function App() {
   }, [])
 
   const onHover = useCallback((hit, px) => {
-    if (!hit || !hit.clan) { setTip(null); return }
-    const c = clanBy(hit.clan)
-    if (!c) { setTip(null); return }
-    setTip({ c, x: px.x, y: px.y, lat: hit.lat, lon: hit.lon })
+    if (!hit) { setTip(null); return }
+    setTip({ c: hit.clan ? clanBy(hit.clan) : null, x: px.x, y: px.y, lat: hit.lat, lon: hit.lon })
   }, [])
 
   const results = q.trim().length
@@ -160,14 +161,20 @@ export default function App() {
       <div ref={tipRef} className={`gtip ${tip ? 'show' : ''}`} style={tip ? { left: tip.x, top: tip.y } : undefined}>
         {tip && (
           <>
-            <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
-              <Crest tag={tip.c.tag} spec={tip.c.crest} size={22} />
-              <span className="n">{tip.c.name}</span>
-            </div>
-            <div className="lbl" style={{ marginTop: 5 }}>
-              [{tip.c.tag}] · {tip.c.land} tiles · lvl {tip.c.lvl}
-            </div>
-            <div className="lbl" style={{ marginTop: 2 }}>{tip.lat.toFixed(1)}°, {tip.lon.toFixed(1)}°</div>
+            {tip.c ? (
+              <>
+                <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
+                  <Crest tag={tip.c.tag} spec={tip.c.crest} size={22} />
+                  <span className="n">{tip.c.name}</span>
+                </div>
+                <div className="lbl" style={{ marginTop: 5 }}>
+                  [{tip.c.tag}] · {tip.c.land} tiles · lvl {tip.c.lvl}
+                </div>
+              </>
+            ) : (
+              <div className="n">Unclaimed</div>
+            )}
+            <div className="lbl" style={{ marginTop: tip.c ? 2 : 5 }}>{tip.lat.toFixed(1)}°, {tip.lon.toFixed(1)}°</div>
           </>
         )}
       </div>
@@ -182,11 +189,10 @@ export default function App() {
           </svg>
         </button>
         <div className="wordmark" onClick={() => { setView(null); setMenu(false) }}>
-          Clans<span className="wm-sub">PONS</span>
+          <span className="wm-word">{SITE.name}<i className="wm-tld">{SITE.tld}</i></span>
           <span className="wm-marks">
             <span className="sep" />
-            <img src={CHAIN.logo} alt={CHAIN.name} title={CHAIN.name} />
-            <img src={LAUNCHPAD.logo} alt={LAUNCHPAD.name} title={`${LAUNCHPAD.name} launchpad`} style={{ background: '#fff' }} />
+            <img src={CHAIN.logo} alt={CHAIN.name} title={`Built on ${CHAIN.name}`} />
           </span>
         </div>
 
@@ -194,9 +200,9 @@ export default function App() {
           <div className="gstat"><span className="lbl">Clans</span><span className="v">{CLANS.length}</span></div>
           <div className="gstat opt"><span className="lbl">Land</span><span className="v acc">{CLAIMED_PCT}%</span></div>
           <div className="gstat"><span className="lbl">Wars</span><span className="v">{LIVE_WARS.length}</span></div>
-          <div className="gstat opt"><span className="lbl"><span className="livedot" /></span><span className="v up">{WALLETS_LIVE} live</span></div>
+          <div className="gstat opt"><span className="lbl"><span className="livedot" /></span><span className="v">{WALLETS_LIVE} wallets</span></div>
           <a className="gstat opt tokenlink" href={LAUNCHPAD.site} target="_blank" rel="noreferrer noopener">
-            <span className="lbl">Official token</span><span className="v gold">${TOKEN.symbol}</span>
+            <span className="lbl">Token</span><span className="v gold">${TOKEN.symbol}</span>
           </a>
         </div>
 
@@ -268,7 +274,7 @@ export default function App() {
         {view ? (
           <>
             <span className="hero-kicker lbl">
-              {CHAIN.name} · coins on {LAUNCHPAD.name} · {CLAIMED_PCT}% of the world claimed
+              {CHAIN.name} · coins on {LAUNCHPAD.name} · {TOTAL_LAND} / {WORLD_TILES} tiles taken
             </span>
             <div className="hero-cta">
               {!wallet && <button className="btn small solid" onClick={() => setSheet(true)}>Connect wallet</button>}
@@ -277,28 +283,27 @@ export default function App() {
           </>
         ) : (
           <>
-            <div className="hero-kicker lbl">{CHAIN.name} · {LAUNCHPAD.name} launchpad</div>
+            <div className="hero-kicker lbl">Genesis · {CHAIN.name} · {LAUNCHPAD.name}</div>
             <h1 className="hero-title">
               <span>Clans</span> <span>The&nbsp;World</span> <span>of</span> <span className="hero-fi">SocialFi</span>
             </h1>
             <p className="hero-sub">
               Social trading as a competitive game, run by the community. Nobody wins alone: wallets
               form clans, clans take land, clan coins launched on {LAUNCHPAD.name} earn the creator
-              rewards, wars settle the rest.
+              rewards, wars settle the rest. The map is empty — the first clan takes first pick.
             </p>
             <div className="hero-chips">
               <span className="hero-chip"><img src={CHAIN.logo} alt="" style={{ height: 11 }} />{CHAIN.name}</span>
-              <span className="hero-chip"><b className="num">{WALLETS_LIVE}</b> wallets live</span>
-              <span className="hero-chip"><b className="num">{CLANS.length}</b> clans</span>
+              <span className="hero-chip"><b className="num">{CLANS.length}</b> clans founded</span>
+              <span className="hero-chip"><b className="num">{TOTAL_LAND}</b> / {WORLD_TILES} tiles taken</span>
               <span className="hero-chip"><b className="num">{CLAIMED_PCT}%</b> of the world claimed</span>
-              <span className="hero-chip"><b className="num">{TOTAL_LAND}</b> / {WORLD_TILES} tiles</span>
             </div>
             <div className="hero-cta">
               {!wallet
                 ? <button className="btn solid" onClick={() => setSheet(true)}>Connect wallet</button>
-                : <button className="btn solid" onClick={() => go('found')}>Found a clan</button>}
+                : <button className="btn solid" onClick={() => go('found')}>Found the first clan</button>}
               <button className="btn" onClick={() => setHow(true)}>How it works</button>
-              <button className="btn" onClick={() => go('directory')}>Clan directory</button>
+              <button className="btn" onClick={() => go('rules')}>The rules</button>
             </div>
           </>
         )}
@@ -311,7 +316,9 @@ export default function App() {
           <span className="item" key={`${tickI}-${i}`}>
             <span className="lbl on">{t.tag}</span>
             <span>{t.text}</span>
-            <span className={t.delta > 0 ? 'up' : 'down'}>{t.delta > 0 ? '+' : ''}{t.delta} {CHAIN.gas}</span>
+            {t.delta !== null && (
+              <span className={t.delta > 0 ? 'up' : 'down'}>{t.delta > 0 ? '+' : ''}{t.delta} {CHAIN.gas}</span>
+            )}
           </span>
         ))}
         <span className="fps" style={{ marginLeft: 'auto' }}>{TOTAL_LAND}/{WORLD_TILES} tiles held</span>
@@ -327,7 +334,9 @@ export default function App() {
 
       <div className={`boot ${booted ? 'gone' : ''}`}>
         <div style={{ textAlign: 'center' }}>
-          <div className="wordmark" style={{ fontSize: 30 }}>Clans</div>
+          <div className="wordmark" style={{ fontSize: 30 }}>
+            <span className="wm-word">{SITE.name}<i className="wm-tld">{SITE.tld}</i></span>
+          </div>
           <div className="lbl" style={{ marginTop: 8 }}>Reading {CHAIN.name}</div>
           <div className="bootbar"><i style={{ width: booted ? '100%' : '35%' }} /></div>
         </div>

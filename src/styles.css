@@ -538,3 +538,24 @@ a.gstat.tokenlink:hover .lbl { color: var(--ink); }
   .topbar, .globalstats { gap: 14px; }
   .search, .fps, .wordmark .wm-sub { display: none; }
 }
+
+/* ---- empty states (genesis) ---- */
+.empty {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+  padding: 26px 0 20px; border-bottom: 1px solid var(--line2);
+}
+.empty-mark { color: var(--ink3); opacity: 0.55; }
+.empty-title { font-family: var(--font-head); font-size: 15px; font-weight: 600; }
+.empty-copy { color: var(--ink2); font-size: 13.5px; line-height: 1.6; max-width: 42ch; margin: 0; }
+
+/* ---- key / value rows ---- */
+.kv { border-top: 1px solid var(--line2); margin: 14px 0 4px; }
+.kv-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 11px 0; border-bottom: 1px solid var(--line2);
+}
+.kv-row .num { font-size: 12.5px; }
+
+/* ---- wordmark: Clans.land ---- */
+.wm-word { white-space: nowrap; }
+.wm-tld { font-style: italic; color: var(--acc); }
