@@ -8,19 +8,35 @@
 
 let driver = null
 
+/* Every hosted provider names the connection string differently, and the
+   pooled one is what a serverless platform needs. Take whichever is set. */
+export function databaseUrl() {
+  const env = process.env
+  return (
+    env.DATABASE_URL ||
+    env.POSTGRES_URL ||
+    env.POSTGRES_PRISMA_URL ||
+    env.POSTGRES_URL_NON_POOLING ||
+    env.NEON_DATABASE_URL ||
+    env.SUPABASE_DB_URL ||
+    ''
+  )
+}
+
 async function connect() {
   if (driver) return driver
 
-  if (process.env.DATABASE_URL) {
+  const url = databaseUrl()
+  if (url) {
     const { default: pg } = await import('pg')
     // One connection per instance: a serverless platform runs many of them and
     // the hosted pooler is what multiplexes underneath.
     const pool = new pg.Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: url,
       max: Number(process.env.DB_POOL_MAX || 1),
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
-      ssl: process.env.DATABASE_URL.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
+      ssl: url.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     })
     driver = {
       query: (text, params) => pool.query(text, params),

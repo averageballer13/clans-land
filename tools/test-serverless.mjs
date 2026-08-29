@@ -2,6 +2,12 @@
    background timer, no event stream. Proves the world still works when every
    request may land on a fresh instance. */
 process.env.SERVERLESS = '1'
+// Its own database directory: the test must not fight a server that is
+// already running against the usual one.
+process.env.CLANS_DB_DIR = process.env.CLANS_DB_DIR || 'server/data/test-pg'
+const { rmSync } = await import('node:fs')
+rmSync(process.env.CLANS_DB_DIR, { recursive: true, force: true })
+
 const { default: app } = await import('../server/app.js')
 const { migrate } = await import('../server/db.js')
 await migrate()
@@ -36,6 +42,8 @@ check('a cheap version endpoint answers', version.status === 200 && typeof versi
 
 const world = await get('/api/world')
 check('the world loads', world.status === 200, JSON.stringify(world.json?.stats))
+check('a fresh world starts empty', world.json?.stats?.clans === 0 && world.json?.stats?.takenTiles === 0)
+check('it warns that no hosted database is attached', health.json?.storage === 'MISSING', health.json?.storage)
 check('the map is the full grid', world.json?.stats?.totalTiles === 1200, `got ${world.json?.stats?.totalTiles}`)
 
 const world2 = await get('/api/world')

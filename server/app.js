@@ -12,7 +12,7 @@ import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { verifyMessage, isAddress, getAddress } from 'viem'
 import {
-  migrate, one, many, run, tx, now, logEvent, bumpVersion, getMeta, setMeta,
+  migrate, one, many, run, tx, now, logEvent, bumpVersion, getMeta, setMeta, databaseUrl,
 } from './db.js'
 import {
   readWorld, grantTiles, reconcileLand, settleDueWars, newId, tileAt,
@@ -62,7 +62,15 @@ const fail = (res, code, error) => res.status(code).json({ error })
    opening, or whether it should just poll.
    ------------------------------------------------------------------ */
 app.get('/api/health', async (_req, res) => {
-  res.json({ ok: true, chain: CHAIN_ID, stream: !SERVERLESS, version: Number(await getMeta('version', '1')) })
+  res.json({
+    ok: true,
+    chain: CHAIN_ID,
+    stream: !SERVERLESS,
+    // Serverless with no hosted database means the world is thrown away
+    // between requests: worth saying out loud rather than looking healthy.
+    storage: databaseUrl() ? 'hosted' : SERVERLESS ? 'MISSING' : 'local',
+    version: Number(await getMeta('version', '1')),
+  })
 })
 
 /* A one-field read so a browser can ask "did anything change?" cheaply. */

@@ -68,9 +68,19 @@ static files. `vercel.json` already wires both.
 One thing has to be added by hand: **a database**. A serverless platform keeps no
 disk between requests, so the world has to live somewhere else.
 
-1. In the Vercel dashboard open **Storage → Create Database → Postgres**, and
-   attach it to the project. That sets `DATABASE_URL` for you.
+1. In the Vercel dashboard open **Storage → Create Database**, and pick
+   **Neon — Serverless Postgres** from the marketplace list. Attach it to the
+   project; it sets the connection string for you.
 2. Redeploy.
+
+Any Postgres works. The connection is read from whichever of `DATABASE_URL`,
+`POSTGRES_URL`, `POSTGRES_PRISMA_URL`, `POSTGRES_URL_NON_POOLING`,
+`NEON_DATABASE_URL` or `SUPABASE_DB_URL` the provider happens to set, so nothing
+has to be renamed by hand.
+
+`GET /api/health` reports `storage`: `hosted` once a database is attached, and
+`MISSING` while a serverless deployment has none — in which case the world is
+thrown away between requests instead of quietly looking healthy.
 
 That is the whole setup. The schema is created on the first request that needs
 it, and the 1200-tile grid is generated once and never regenerated, so the map
