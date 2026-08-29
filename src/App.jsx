@@ -59,6 +59,10 @@ function HowItWorks({ onClose }) {
   )
 }
 
+const SERVER_HINT = typeof location !== 'undefined'
+  ? `${location.protocol}//${location.hostname}:8787`
+  : 'http://localhost:8787'
+
 /* ---------------- Wallet sheet ---------------- */
 function WalletIcon({ wallet }) {
   if (wallet.icon) return <img className="wicon" src={wallet.icon} alt="" />
@@ -167,13 +171,17 @@ function WalletSheet({ onClose, toast }) {
           {rest.map(Row)}
         </div>
 
-        {status === 'offline' && (
-          <p className="empty-copy down" style={{ marginTop: 10 }}>
-            The game server is not reachable, so signing in will not work yet.
-          </p>
-        )}
-        {error && <p className="empty-copy down" style={{ marginTop: 10 }}>{error}</p>}
-        {!ready && <p className="empty-copy" style={{ marginTop: 10 }}>Tick both lines above to connect.</p>}
+        {status === 'offline' ? (
+          <div className="wnote">
+            <b>The game server is not answering.</b>
+            <span>Start it with <code>npm run dev</code>, or open the site on the port the server itself
+              serves ({SERVER_HINT}). Signing in needs it.</span>
+          </div>
+        ) : error ? (
+          <p className="empty-copy down" style={{ marginTop: 10 }}>{error}</p>
+        ) : !ready ? (
+          <p className="empty-copy" style={{ marginTop: 10 }}>Tick both lines above to connect.</p>
+        ) : null}
       </div>
     </div>
   )
@@ -262,7 +270,7 @@ function Shell({ toast, toasts }) {
         paused={how}
       />
 
-      <div ref={tipRef} className={`gtip ${tip ? 'show' : ''}`} style={tip ? { left: tip.x, top: tip.y } : undefined}>
+      <div ref={tipRef} className={`gtip ${tip && !sheet && !how ? 'show' : ''}`} style={tip ? { left: tip.x, top: tip.y } : undefined}>
         {tip && (
           <>
             {tipClan ? (

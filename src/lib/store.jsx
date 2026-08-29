@@ -4,23 +4,41 @@ import { connect as connectWallet, signMessage } from './wallet.js'
 const TOKEN_KEY = 'clans.session'
 const Ctx = createContext(null)
 
+/* Same origin by default. Set VITE_API_URL when the site and the API are
+   served from different places. */
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+export const apiUrl = (path) => API_BASE + path
+
+class Unreachable extends Error {
+  constructor(url, why) {
+    super(`The game server is not answering at ${url}. ${why}`)
+    this.unreachable = true
+  }
+}
+
 async function call(path, { method = 'GET', body, token } = {}) {
-  const res = await fetch(path, {
-    method,
-    headers: {
-      ...(body ? { 'content-type': 'application/json' } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  const url = apiUrl(path)
+  let res
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        ...(body ? { 'content-type': 'application/json' } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    throw new Unreachable(url, 'Nothing is listening there.')
+  }
+
+  // A 404 from our own API means this page reached a web server that does not
+  // carry the game — almost always the site without its API behind it.
+  if (res.status === 404) throw new Unreachable(url, 'That address serves the site but not the game.')
+
   let json = null
   try { json = await res.json() } catch { /* empty body */ }
-  if (!res.ok) {
-    // A 404 on our own API means the page is talking to something that is not
-    // the game server — say that, rather than showing a bare status code.
-    if (res.status === 404) throw new Error('The game server is not reachable. Is it running?')
-    throw new Error(json?.error || `Something went wrong (${res.status})`)
-  }
+  if (!res.ok) throw new Error(json?.error || `Something went wrong (${res.status})`)
   return json
 }
 
@@ -57,8 +75,10 @@ export function WorldProvider({ children, onToast }) {
       const w = await call('/api/world')
       setWorld(w)
       setStatus('live')
+      return true
     } catch {
       setStatus('offline')
+      return false
     }
   }, [])
 
@@ -82,18 +102,15 @@ export function WorldProvider({ children, onToast }) {
      where the stream cannot be held open. */
   useEffect(() => {
     let source
-    let poll
     try {
-      source = new EventSource('/api/stream')
+      source = new EventSource(apiUrl('/api/stream'))
       source.onmessage = () => refresh()
-      source.onerror = () => {
-        setStatus((s) => (s === 'live' ? 'live' : s))
-        if (!poll) poll = setInterval(refresh, 6000)
-      }
-    } catch {
-      poll = setInterval(refresh, 6000)
-    }
-    return () => { source?.close(); if (poll) clearInterval(poll) }
+    } catch { /* polling below covers it */ }
+
+    // Polling runs regardless: it is what brings the world back after the
+    // server was restarted, without anyone having to reload the page.
+    const poll = setInterval(refresh, 6000)
+    return () => { source?.close(); clearInterval(poll) }
   }, [refresh])
 
   /* ---- session ---- */
