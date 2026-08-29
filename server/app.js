@@ -43,10 +43,11 @@ app.use((req, res, next) => {
   next()
 })
 
-/* The schema is created on the first request that needs it. */
+/* The schema is created on the first request that needs it. Health is exempt:
+   it has to keep answering precisely when the database is the problem. */
 let migrated = false
 app.use(async (req, res, next) => {
-  if (!req.path.startsWith('/api/')) return next()
+  if (!req.path.startsWith('/api/') || req.path === '/api/health') return next()
   try {
     if (!migrated) { await migrate(); migrated = true }
     next()
@@ -62,15 +63,31 @@ const fail = (res, code, error) => res.status(code).json({ error })
    opening, or whether it should just poll.
    ------------------------------------------------------------------ */
 app.get('/api/health', async (_req, res) => {
-  res.json({
-    ok: true,
+  const url = databaseUrl()
+  const out = {
+    ok: false,
     chain: CHAIN_ID,
     stream: !SERVERLESS,
+    serverless: SERVERLESS,
     // Serverless with no hosted database means the world is thrown away
     // between requests: worth saying out loud rather than looking healthy.
-    storage: databaseUrl() ? 'hosted' : SERVERLESS ? 'MISSING' : 'local',
-    version: Number(await getMeta('version', '1')),
-  })
+    storage: url ? 'hosted' : SERVERLESS ? 'MISSING' : 'local',
+  }
+  if (url) {
+    // The host, never the credentials, so a broken deployment can be read
+    // from the outside without leaking anything.
+    try { out.database = new URL(url).host } catch { out.database = 'unreadable url' }
+  }
+  try {
+    await migrate()
+    migrated = true
+    out.version = Number(await getMeta('version', '1'))
+    out.tiles = Number((await one('SELECT COUNT(*)::int AS n FROM tiles')).n)
+    out.ok = true
+  } catch (e) {
+    out.error = String(e?.message || e).slice(0, 300)
+  }
+  res.status(out.ok ? 200 : 503).json(out)
 })
 
 /* A one-field read so a browser can ask "did anything change?" cheaply. */
