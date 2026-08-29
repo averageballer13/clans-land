@@ -9,8 +9,12 @@ export const CHAIN = {
   logo: '/brand/robinhood-feather.svg',
   logoDark: '/brand/robinhood-feather-dark.svg',
   site: 'https://robinhood.com/us/en/chain/',
-  docs: 'https://docs.robinhood.com/chain/',
-  explorer: 'https://explorer.robinhood.com',
+  docs: 'https://docs.robinhood.com/chain/connecting',
+  // Mainnet, live since 1 July 2026. Values from docs.robinhood.com/chain/connecting.
+  id: 4663,
+  hexId: '0x1237',
+  rpc: 'https://rpc.mainnet.chain.robinhood.com',
+  explorer: 'https://robinhoodchain.blockscout.com',
 }
 
 export const LAUNCHPAD = {

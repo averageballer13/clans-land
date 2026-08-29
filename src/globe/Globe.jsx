@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { buildEarthMap } from './earthTexture.js'
-import { CLANS, buildTiles } from '../lib/world.js'
 
 const R = 1
 const DEG = Math.PI / 180
@@ -21,23 +20,33 @@ function vecToLL(v) {
 }
 
 /* Land paint: a soft tint per tile plus a crisp edge, both merged into one
-   draw call. The tint stays low so the map underneath stays readable — the
-   edges are what make a territory legible. */
-function buildTileLayers(tiles, clanColour) {
-  const pos = [], col = [], idx = []
-  const epos = [], ecol = []
+   draw call each. The tint stays low so the map underneath stays readable —
+   the edges are what make a territory legible. */
+function buildTileLayers(tiles, colourOf) {
+  const pos = [], col = [], idx = [], epos = [], ecol = []
   const SEG = 2
   let n = 0
-  const neighbourClan = (t, dLat, dLon) => {
-    for (const o of tiles) {
-      if (Math.abs(o.lat - (t.lat + dLat)) < 0.01 && Math.abs(o.lon - (t.lon + dLon)) < o.dLon / 2) return o.clan
-    }
-    return null
+
+  const byRow = new Map()
+  for (const t of tiles) {
+    const key = t.lat.toFixed(3)
+    if (!byRow.has(key)) byRow.set(key, [])
+    byRow.get(key).push(t)
+  }
+  const rowLats = [...byRow.keys()].map(Number).sort((a, b) => a - b)
+  const neighbourAbove = (t) => {
+    const i = rowLats.indexOf(Number(t.lat.toFixed(3)))
+    const row = byRow.get(rowLats[i + 1]?.toFixed(3))
+    return row?.find((o) => Math.abs(o.lon - t.lon) <= o.dLon / 2)?.clan ?? null
+  }
+  const neighbourBelow = (t) => {
+    const i = rowLats.indexOf(Number(t.lat.toFixed(3)))
+    const row = byRow.get(rowLats[i - 1]?.toFixed(3))
+    return row?.find((o) => Math.abs(o.lon - t.lon) <= o.dLon / 2)?.clan ?? null
   }
 
   for (const t of tiles) {
-    if (!t.clan) continue
-    const c = new THREE.Color(clanColour[t.clan])
+    const c = new THREE.Color(colourOf(t.clan))
     const lat0 = t.lat - t.dLat / 2, lon0 = t.lon - t.dLon / 2
 
     for (let i = 0; i <= SEG; i++) {
@@ -55,15 +64,14 @@ function buildTileLayers(tiles, clanColour) {
     }
     n += (SEG + 1) * (SEG + 1)
 
-    // Edge only where the tile borders a different clan or open ground.
     const corners = [
       [lat0, lon0], [lat0, lon0 + t.dLon],
       [lat0 + t.dLat, lon0 + t.dLon], [lat0 + t.dLat, lon0],
     ]
     const sides = [
-      { a: 0, b: 1, other: neighbourClan(t, -t.dLat, 0) },
+      { a: 0, b: 1, other: neighbourBelow(t) },
       { a: 1, b: 2, other: null },
-      { a: 2, b: 3, other: neighbourClan(t, t.dLat, 0) },
+      { a: 2, b: 3, other: neighbourAbove(t) },
       { a: 3, b: 0, other: null },
     ]
     for (const s of sides) {
@@ -98,6 +106,31 @@ function buildTileLayers(tiles, clanColour) {
   return { fill, edges }
 }
 
+function buildCapitals(clans) {
+  const group = new THREE.Group()
+  for (const c of clans) {
+    const base = llToVec(c.cap[0], c.cap[1], R * 1.005)
+    const top = llToVec(c.cap[0], c.cap[1], R * (1.06 + Math.min(c.land, 90) / 900))
+    const col = new THREE.Color(c.paint)
+    group.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([base, top]),
+      new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.85 })
+    ))
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.009, 12, 12), new THREE.MeshBasicMaterial({ color: col }))
+    dot.position.copy(top)
+    group.add(dot)
+    const halo = new THREE.Mesh(
+      new THREE.RingGeometry(0.02, 0.032, 32),
+      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+    )
+    halo.position.copy(base)
+    halo.lookAt(base.clone().multiplyScalar(2))
+    halo.userData.pulse = Math.random() * Math.PI * 2
+    group.add(halo)
+  }
+  return group
+}
+
 const ATMO_VERT = `
 varying vec3 vN; varying vec3 vP;
 void main(){ vN = normalize(normalMatrix * normal); vP = normalize((modelViewMatrix * vec4(position,1.)).xyz);
@@ -111,35 +144,42 @@ void main(){
   gl_FragColor = vec4(uColor, rim * uStrength);
 }`
 
-export default function Globe({ onHover, onPick, focus, paused }) {
+function disposeTree(obj) {
+  obj.traverse?.((o) => {
+    o.geometry?.dispose?.()
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose())
+  })
+}
+
+export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickPoint, pickMode = false, marker = null, focus, paused }) {
   const ref = useRef(null)
   const api = useRef({})
 
+  /* ---- scene, built once ---- */
   useEffect(() => {
     const canvas = ref.current
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance',
+    const renderer = new THREE.WebGLRenderer({
+      canvas, antialias: true, alpha: true, powerPreference: 'high-performance',
       // dev only: lets tooling read the frame back for visual checks
       preserveDrawingBuffer: import.meta.env.DEV,
     })
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.1
+    renderer.toneMappingExposure = 0.95
 
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100)
     camera.position.set(0, 0, 3.05)
 
-    /* ---- lighting: one warm key (the sun), one cold fill ---- */
-    const sun = new THREE.DirectionalLight(0xfff2e2, 1.35)
+    const sun = new THREE.DirectionalLight(0xfff2e2, 0.55)
     sun.position.set(-2.2, 1.1, 2.4)
     scene.add(sun)
-    scene.add(new THREE.AmbientLight(0xb8c4d4, 2.1))
-    const rim = new THREE.DirectionalLight(0xff7a1a, 0.55)
+    scene.add(new THREE.AmbientLight(0xcdd6e2, 3.1))
+    const rim = new THREE.DirectionalLight(0xff7a1a, 0.4)
     rim.position.set(2.6, -0.8, -2)
     scene.add(rim)
 
-    /* ---- stars ---- */
     const starGeo = new THREE.BufferGeometry()
     const sp = [], sc = []
     for (let i = 0; i < 2600; i++) {
@@ -153,7 +193,6 @@ export default function Globe({ onHover, onPick, focus, paused }) {
     const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ size: 0.12, vertexColors: true, transparent: true, opacity: 0.75, sizeAttenuation: true }))
     scene.add(stars)
 
-    /* ---- world group ---- */
     const world = new THREE.Group()
     scene.add(world)
 
@@ -161,7 +200,6 @@ export default function Globe({ onHover, onPick, focus, paused }) {
     const earth = new THREE.Mesh(new THREE.SphereGeometry(R, 96, 64), earthMat)
     world.add(earth)
 
-    /* ---- atmosphere: inner haze + outer bloom ---- */
     const atmoIn = new THREE.Mesh(
       new THREE.SphereGeometry(R * 1.012, 96, 64),
       new THREE.ShaderMaterial({
@@ -171,13 +209,13 @@ export default function Globe({ onHover, onPick, focus, paused }) {
       })
     )
     world.add(atmoIn)
-    // Outer halo: a camera-facing radial gradient behind the planet. A second
-    // shader shell would peak at its own limb and read as a hard ring.
+
+    // Outer halo: a camera-facing radial gradient behind the planet, hollow
+    // inside its silhouette. A second shader shell would peak at its own limb
+    // and read as a hard ring.
     const haloCv = document.createElement('canvas')
     haloCv.width = haloCv.height = 512
     const hx = haloCv.getContext('2d')
-    // Transparent inside the planet's own silhouette (sprite is 3.4R wide, so the
-    // globe limb sits at 1/1.7 of the radius), glowing only outwards.
     const hg = hx.createRadialGradient(256, 256, 0, 256, 256, 256)
     hg.addColorStop(0, 'rgba(255,122,26,0)')
     hg.addColorStop(0.575, 'rgba(255,122,26,0)')
@@ -187,74 +225,45 @@ export default function Globe({ onHover, onPick, focus, paused }) {
     hg.addColorStop(1, 'rgba(0,0,0,0)')
     hx.fillStyle = hg
     hx.fillRect(0, 0, 512, 512)
-    const haloTex = new THREE.CanvasTexture(haloCv)
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: haloTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+      map: new THREE.CanvasTexture(haloCv), transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
     }))
     halo.scale.setScalar(R * 3.4)
     halo.renderOrder = -1
     scene.add(halo)
 
-    /* ---- clan land + capitals ---- */
-    const clanColour = {}
-    for (const c of CLANS) clanColour[c.id] = c.paint
-    const tiles = buildTiles()
-    const { fill: tileFill, edges: tileEdges } = buildTileLayers(tiles, clanColour)
-    world.add(tileFill)
-    world.add(tileEdges)
+    // Where a clan is about to plant its capital.
+    const pin = new THREE.Group()
+    pin.visible = false
+    const pinDot = new THREE.Mesh(new THREE.SphereGeometry(0.012, 14, 14), new THREE.MeshBasicMaterial({ color: 0xff6a00 }))
+    const pinRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.026, 0.04, 40),
+      new THREE.MeshBasicMaterial({ color: 0xff6a00, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
+    )
+    pin.add(pinDot, pinRing)
+    world.add(pin)
 
-    const capitals = new THREE.Group()
-    world.add(capitals)
-    for (const c of CLANS) {
-      const base = llToVec(c.cap[0], c.cap[1], R * 1.005)
-      const top = llToVec(c.cap[0], c.cap[1], R * (1.06 + Math.min(c.land, 90) / 900))
-      const col = new THREE.Color(c.crest.ink)
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([base, top]),
-        new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.85 })
-      )
-      capitals.add(line)
-      const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.009, 12, 12),
-        new THREE.MeshBasicMaterial({ color: col })
-      )
-      dot.position.copy(top)
-      dot.userData.clan = c.id
-      capitals.add(dot)
-      const halo = new THREE.Mesh(
-        new THREE.RingGeometry(0.02, 0.032, 32),
-        new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
-      )
-      halo.position.copy(base)
-      halo.lookAt(base.clone().multiplyScalar(2))
-      halo.userData.pulse = Math.random() * Math.PI * 2
-      capitals.add(halo)
-    }
-
-    /* ---- texture ---- */
-    let disposed = false
     fetch('/data/earth.json')
       .then((r) => r.json())
       .then((geo) => {
-        if (disposed) return
         const size = Math.min(renderer.capabilities.maxTextureSize, 2048)
         const tex = new THREE.CanvasTexture(buildEarthMap(geo, size))
         tex.anisotropy = renderer.capabilities.getMaxAnisotropy()
         tex.colorSpace = THREE.SRGBColorSpace
         earthMat.map = tex
         earthMat.needsUpdate = true
-        api.current.ready = true
       })
-      .catch(() => { api.current.ready = true })
+      .catch(() => { /* the globe still turns, just grey */ })
 
-    /* ---- camera controls ---- */
+    /* ---- controls ---- */
     let rotY = -1.35, rotX = -0.22, dist = 3.05
     let targetY = rotY, targetX = rotX, targetDist = dist
     let spin = 0.00035
     let dragging = false, lastX = 0, lastY = 0, moved = 0
 
     const onDown = (e) => { dragging = true; moved = 0; lastX = e.clientX; lastY = e.clientY; canvas.style.cursor = 'grabbing' }
-    const onUp = () => { dragging = false; canvas.style.cursor = 'grab' }
+    const onUp = () => { dragging = false; canvas.style.cursor = api.current.pickMode ? 'crosshair' : 'grab' }
     const onMove = (e) => {
       if (dragging) {
         const dx = e.clientX - lastX, dy = e.clientY - lastY
@@ -272,7 +281,11 @@ export default function Globe({ onHover, onPick, focus, paused }) {
       e.preventDefault()
       targetDist = THREE.MathUtils.clamp(targetDist + e.deltaY * 0.0016, 1.45, 5.2)
     }
-    const onClick = () => { if (moved < 6 && hoverTile?.clan && onPick) onPick(hoverTile.clan) }
+    const onClick = () => {
+      if (moved >= 6) return
+      if (api.current.pickMode) { if (hoverLL) api.current.onPickPoint?.(hoverLL[0], hoverLL[1]) }
+      else if (hoverTile?.clan) api.current.onPick?.(hoverTile.clan)
+    }
 
     canvas.addEventListener('pointerdown', onDown)
     addEventListener('pointerup', onUp)
@@ -281,15 +294,15 @@ export default function Globe({ onHover, onPick, focus, paused }) {
     canvas.addEventListener('click', onClick)
     canvas.style.cursor = 'grab'
 
-    /* ---- hover picking ---- */
     const ray = new THREE.Raycaster()
     const pointer = new THREE.Vector2(2, 2)
     let pointerPx = { x: 0, y: 0 }
     let hoverDirty = false
     let hoverTile = null
+    let hoverLL = null
 
     const tileAt = (lat, lon) => {
-      for (const t of tiles) {
+      for (const t of api.current.tiles || []) {
         if (Math.abs(t.lat - lat) <= t.dLat / 2) {
           let d = lon - t.lon
           while (d > 180) d -= 360
@@ -300,20 +313,19 @@ export default function Globe({ onHover, onPick, focus, paused }) {
       return null
     }
 
-    /* ---- resize ---- */
     const resize = () => {
-      const w = canvas.clientWidth || innerWidth
-      const h = canvas.clientHeight || innerHeight
+      // A hidden or collapsed container reports 0, and 0 / 0 would poison the
+      // projection matrix with NaN for the rest of the session.
+      const w = Math.max(1, canvas.clientWidth || innerWidth || 1)
+      const h = Math.max(1, canvas.clientHeight || innerHeight || 1)
       renderer.setSize(w, h, false)
       camera.aspect = w / h
       camera.updateProjectionMatrix()
     }
     resize()
-    if (import.meta.env.DEV) window.__globe = { renderer, scene, camera, api: api.current }
     const ro = new ResizeObserver(resize)
     ro.observe(canvas)
 
-    /* ---- focus API (fly to a clan capital) ---- */
     api.current.flyTo = (lat, lon, zoom = 2.1) => {
       targetY = -(lon + 180) * DEG - Math.PI / 2
       targetX = THREE.MathUtils.clamp(lat * DEG, -1.25, 1.25)
@@ -321,11 +333,20 @@ export default function Globe({ onHover, onPick, focus, paused }) {
       spin = 0
       setTimeout(() => { spin = 0.00035 }, 4000)
     }
+    api.current.setMarker = (ll) => {
+      if (!ll) { pin.visible = false; return }
+      const at = llToVec(ll[0], ll[1], R * 1.01)
+      pin.position.copy(at)
+      pinRing.lookAt(at.clone().multiplyScalar(2))
+      pinRing.position.set(0, 0, 0)
+      pinDot.position.set(0, 0, 0)
+      pin.visible = true
+    }
+    api.current.world = world
+    if (import.meta.env.DEV) window.__globe = { renderer, scene, camera, api: api.current }
 
-    /* ---- loop ---- */
     let raf = 0
     let last = performance.now()
-    let fpsAcc = 0, fpsN = 0
     const tick = (now) => {
       raf = requestAnimationFrame(tick)
       const dt = Math.min(now - last, 60)
@@ -341,15 +362,14 @@ export default function Globe({ onHover, onPick, focus, paused }) {
       camera.position.z = dist
       stars.rotation.y += 0.000012 * dt
 
-      // capital halos breathe
       const t = now * 0.001
-      capitals.children.forEach((c) => {
+      api.current.capitals?.children.forEach((c) => {
         if (c.userData.pulse !== undefined) {
-          const s = 1 + Math.sin(t * 1.4 + c.userData.pulse) * 0.28
-          c.scale.setScalar(s)
+          c.scale.setScalar(1 + Math.sin(t * 1.4 + c.userData.pulse) * 0.28)
           c.material.opacity = 0.5 - Math.sin(t * 1.4 + c.userData.pulse) * 0.22
         }
       })
+      if (pin.visible) pinRing.scale.setScalar(1 + Math.sin(t * 3) * 0.18)
 
       if (hoverDirty) {
         hoverDirty = false
@@ -357,27 +377,25 @@ export default function Globe({ onHover, onPick, focus, paused }) {
         const hit = ray.intersectObject(earth, false)[0]
         if (hit) {
           const local = world.worldToLocal(hit.point.clone())
-          const [lat, lon] = vecToLL(local)
-          const tile = tileAt(lat, lon)
-          if (tile !== hoverTile) {
-            hoverTile = tile
-            onHover && onHover(tile ? { clan: tile.clan, lat, lon } : null, pointerPx)
-          } else if (tile) onHover && onHover({ clan: tile.clan, lat, lon }, pointerPx)
-          canvas.style.cursor = dragging ? 'grabbing' : tile?.clan ? 'pointer' : 'grab'
-        } else if (hoverTile) {
+          hoverLL = vecToLL(local)
+          const tile = tileAt(hoverLL[0], hoverLL[1])
+          hoverTile = tile
+          api.current.onHover?.({ clan: tile?.clan ?? null, lat: hoverLL[0], lon: hoverLL[1] }, pointerPx)
+          canvas.style.cursor = dragging ? 'grabbing'
+            : api.current.pickMode ? 'crosshair'
+              : tile?.clan ? 'pointer' : 'grab'
+        } else if (hoverLL) {
+          hoverLL = null
           hoverTile = null
-          onHover && onHover(null, pointerPx)
+          api.current.onHover?.(null, pointerPx)
         }
       }
 
       renderer.render(scene, camera)
-      fpsAcc += dt; fpsN++
-      if (fpsAcc > 1000) { api.current.fps = Math.round((fpsN * 1000) / fpsAcc); fpsAcc = 0; fpsN = 0 }
     }
     raf = requestAnimationFrame(tick)
 
     return () => {
-      disposed = true
       cancelAnimationFrame(raf)
       ro.disconnect()
       canvas.removeEventListener('pointerdown', onDown)
@@ -386,17 +404,38 @@ export default function Globe({ onHover, onPick, focus, paused }) {
       canvas.removeEventListener('wheel', onWheel)
       canvas.removeEventListener('click', onClick)
       renderer.dispose()
-      scene.traverse((o) => {
-        if (o.geometry) o.geometry.dispose()
-        if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose())
-      })
+      disposeTree(scene)
     }
   }, [])
 
+  /* ---- handlers and flags read by the loop without rebuilding the scene ---- */
+  useEffect(() => { api.current.onHover = onHover }, [onHover])
+  useEffect(() => { api.current.onPick = onPick }, [onPick])
+  useEffect(() => { api.current.onPickPoint = onPickPoint }, [onPickPoint])
+  useEffect(() => { api.current.pickMode = pickMode }, [pickMode])
   useEffect(() => { api.current.paused = paused }, [paused])
+  useEffect(() => { api.current.tiles = tiles }, [tiles])
+  useEffect(() => { api.current.setMarker?.(marker) }, [marker])
+  useEffect(() => { if (focus && api.current.flyTo) api.current.flyTo(focus[0], focus[1], focus[2] ?? 2.1) }, [focus])
+
+  /* ---- land and capitals, rebuilt whenever the shared world changes ---- */
   useEffect(() => {
-    if (focus && api.current.flyTo) api.current.flyTo(focus[0], focus[1], focus[2] ?? 2.1)
-  }, [focus])
+    const world = api.current.world
+    if (!world) return
+    const paint = new Map(clans.map((c) => [c.id, c.paint]))
+    const colourOf = (id) => paint.get(id) || '#ff6a00'
+
+    const { fill, edges } = buildTileLayers(tiles, colourOf)
+    const capitals = buildCapitals(clans)
+    world.add(fill, edges, capitals)
+    api.current.capitals = capitals
+
+    return () => {
+      world.remove(fill, edges, capitals)
+      disposeTree(fill); disposeTree(edges); disposeTree(capitals)
+      if (api.current.capitals === capitals) api.current.capitals = null
+    }
+  }, [tiles, clans])
 
   return <canvas className="globe" ref={ref} />
 }

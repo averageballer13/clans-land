@@ -559,3 +559,10 @@ a.gstat.tokenlink:hover .lbl { color: var(--ink); }
 /* ---- wordmark: Clans.land ---- */
 .wm-word { white-space: nowrap; }
 .wm-tld { font-style: italic; color: var(--acc); }
+
+/* ---- leaderboard without the sparkline column ---- */
+.lb-row-4 { grid-template-columns: 34px 34px 1fr 92px; }
+
+/* ---- the connected-wallet pill doubles as a sign-out button ---- */
+button.chainpill { cursor: pointer; font-family: var(--font-head); text-transform: none; letter-spacing: 0.02em; }
+button.chainpill:hover { border-color: var(--acc); color: var(--acc); }

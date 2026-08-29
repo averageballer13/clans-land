@@ -1,21 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Globe from './globe/Globe.jsx'
 import Crest from './ui/Crest.jsx'
-import { CHAIN, LAUNCHPAD, SITE, TOKEN, WALLETS, WORLD_TILES } from './lib/brand.js'
-import { CLANS, clanBy, crestFor, makeTicker, CLAIMED_PCT, TOTAL_LAND, WALLETS_LIVE, LIVE_WARS, BOUNTIES } from './lib/world.js'
-import { WorldMap, Directory, Leaderboard, Wars, Bounties, Token, Found, ClanDetail, Rules, Terms } from './panels/Panels.jsx'
-
-const NAV = [
-  ['world', 'World map', () => `${CLAIMED_PCT}% claimed`],
-  ['found', 'Found a clan', () => 'open'],
-  ['directory', 'Clan directory', () => String(CLANS.length)],
-  ['bounties', 'Bounties', () => `${BOUNTIES.length} open`],
-  ['wars', 'Wars', () => `${LIVE_WARS.length} live`],
-  ['leaderboard', 'Leaderboard', () => ''],
-  ['token', 'Official token', () => `$${TOKEN.symbol}`],
-  ['rules', 'The rules', () => ''],
-  ['terms', 'Terms', () => ''],
-]
+import { WorldProvider, useWorld } from './lib/store.jsx'
+import { randomCrest } from './lib/crest.js'
+import { providers, hasWallet } from './lib/wallet.js'
+import { CHAIN, LAUNCHPAD, SITE, TOKEN, WALLETS, WORLD_TILES, shortAddr } from './lib/brand.js'
+import {
+  WorldMap, Directory, Leaderboard, Wars, Bounties, Token, Found, ClanDetail, Rules, Terms,
+} from './panels/Panels.jsx'
 
 const TITLES = {
   world: 'World Map', found: 'Found a Clan', directory: 'Clan Directory', bounties: 'Bounties',
@@ -24,15 +16,13 @@ const TITLES = {
 
 /* ---------------- How it works ---------------- */
 const HOW = [
-  { t: 'Connect', c: `Bring a wallet to ${CHAIN.name}. Nothing is custodial: the site reads the chain, you sign everything yourself.` },
+  { t: 'Connect', c: `Bring a wallet to ${CHAIN.name}. Signing in signs a plain message — no gas, no transaction, no access to your funds.` },
   { t: 'Form a clan', c: 'Up to 50 wallets under one crest. Leader, Co Leaders, Elders, Members. Open, request, or invite only.' },
-  { t: 'Take land', c: `6 tiles for the banner, 3 more per wallet, painted around your capital. ${WORLD_TILES} tiles in the world, all of them still open.` },
-  { t: 'Deploy the coin', c: `The Leader launches the clan coin on ${LAUNCHPAD.name}. Every trade accrues creator fees to the coin's own vault.` },
-  { t: 'Go to war', c: `One number a side: real net ${CHAIN.gas} made during the window. Winner takes a fifth of the loser's land.` },
+  { t: 'Take land', c: `Plant a capital anywhere still open and the map paints outward: 6 tiles for the banner, 3 more per wallet. ${WORLD_TILES} tiles in the world, shared by everyone.` },
+  { t: 'Deploy the coin', c: `The Leader launches the clan coin on ${LAUNCHPAD.name} and registers it. Every trade accrues creator fees to the coin's own vault.` },
+  { t: 'Go to war', c: `One number a side: net ${CHAIN.gas} made during the window. When the clock runs out the winner takes a fifth of the loser's land.` },
 ]
-
-// Illustration only: the walkthrough shows what a crest can look like.
-const DEMO_CRESTS = ['ALPHA', 'BETA', 'GAMMA', 'DELTA'].map(crestFor)
+const DEMO_CRESTS = ['ALPHA', 'BETA', 'GAMMA', 'DELTA'].map(randomCrest)
 
 function HowItWorks({ onClose }) {
   const [i, setI] = useState(0)
@@ -70,17 +60,37 @@ function HowItWorks({ onClose }) {
 }
 
 /* ---------------- Wallet sheet ---------------- */
-function WalletSheet({ onClose, onConnect }) {
+function WalletSheet({ onClose, toast }) {
+  const { signIn } = useWorld()
   const [ok, setOk] = useState([false, false])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const detected = providers()
   const gates = [
-    `I understand Clans is a game layer over public ${CHAIN.name} data and holds none of my funds.`,
+    `I understand Clans.land is a game layer over public ${CHAIN.name} activity and holds none of my funds.`,
     'I accept the Terms of Use and understand nothing here is financial advice.',
   ]
+  const ready = ok[0] && ok[1]
+
+  const go = async (id, name) => {
+    setBusy(true); setError(null)
+    try {
+      const s = await signIn(id)
+      toast(`${name} connected`)
+      onClose()
+      return s
+    } catch (e) {
+      setError(e?.message || 'the wallet refused')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="sheet">
         <h2>Connect wallet</h2>
-        <span className="lbl">{CHAIN.name} · chain reads only, you sign everything</span>
+        <span className="lbl">{CHAIN.name} · chain {CHAIN.id} · you sign a message, never a transaction</span>
         <div className="tosgate" style={{ marginTop: 16 }}>
           {gates.map((g, i) => (
             <button key={i} className={`tosrow ${ok[i] ? 'on' : ''}`} onClick={() => setOk((o) => o.map((v, n) => (n === i ? !v : v)))}>
@@ -89,12 +99,35 @@ function WalletSheet({ onClose, onConnect }) {
             </button>
           ))}
         </div>
-        {WALLETS.map((w) => (
-          <button key={w.id} className="wopt" disabled={!ok[0] || !ok[1]} onClick={() => onConnect(w)}>
-            <span className="w"><img src={w.logo} alt="" />{w.name}</span>
-            <span className="lbl">Connect</span>
-          </button>
-        ))}
+
+        {detected.length > 0 ? detected.map((d) => {
+          const known = WALLETS.find((w) => w.id === d.id)
+          return (
+            <button key={d.id} className="wopt" disabled={!ready || busy} onClick={() => go(d.id, d.name)}>
+              <span className="w">{known && <img src={known.logo} alt="" />}{d.name}</span>
+              <span className="lbl">{busy ? 'Waiting…' : 'Connect'}</span>
+            </button>
+          )
+        }) : (
+          <>
+            <p className="empty-copy" style={{ margin: '4px 0 12px' }}>
+              No wallet detected in this browser. Install one, then reload this page.
+            </p>
+            {WALLETS.map((w) => (
+              <a key={w.id} className="wopt" href={
+                w.id === 'metamask' ? 'https://metamask.io/download/'
+                  : w.id === 'rabby' ? 'https://rabby.io/'
+                    : w.id === 'coinbase' ? 'https://www.coinbase.com/wallet/downloads'
+                      : 'https://walletconnect.network/'
+              } target="_blank" rel="noreferrer noopener">
+                <span className="w"><img src={w.logo} alt="" />{w.name}</span>
+                <span className="lbl">Install</span>
+              </a>
+            ))}
+          </>
+        )}
+
+        {error && <p className="empty-copy down" style={{ marginTop: 12 }}>{error}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
           <button className="btn small ghost" onClick={onClose}>Cancel</button>
         </div>
@@ -103,28 +136,24 @@ function WalletSheet({ onClose, onConnect }) {
   )
 }
 
-/* ---------------- App ---------------- */
-export default function App() {
+/* ---------------- Shell ---------------- */
+function Shell({ toast, toasts }) {
+  const world = useWorld()
+  const { clans, tiles, events, stats, status, me, signedIn, signOut, clanBy } = world
+
   const [menu, setMenu] = useState(false)
   const [view, setView] = useState(null)
   const [clanId, setClanId] = useState(null)
   const [how, setHow] = useState(false)
-  const [wallet, setWallet] = useState(null)
   const [sheet, setSheet] = useState(false)
-  const [toasts, setToasts] = useState([])
   const [tip, setTip] = useState(null)
   const [focus, setFocus] = useState(null)
   const [q, setQ] = useState('')
   const [booted, setBooted] = useState(false)
-  const tipRef = useRef(null)
-  const ticker = useMemo(() => makeTicker(), [])
+  const [pickMode, setPickMode] = useState(false)
+  const [capital, setCapital] = useState(null)
   const [tickI, setTickI] = useState(0)
-
-  const toast = useCallback((text) => {
-    const id = Math.random().toString(36).slice(2)
-    setToasts((t) => [...t, { id, text }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600)
-  }, [])
+  const tipRef = useRef(null)
 
   const go = useCallback((v, id) => {
     if (v === 'clan') { setClanId(id); setView('clan') } else { setView(v); setClanId(null) }
@@ -133,51 +162,85 @@ export default function App() {
 
   useEffect(() => {
     const t = setTimeout(() => setBooted(true), 900)
-    const iv = setInterval(() => setTickI((i) => (i + 1) % 1e9), 3200)
+    const iv = setInterval(() => setTickI((i) => i + 1), 3600)
     return () => { clearTimeout(t); clearInterval(iv) }
   }, [])
 
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') { setView(null); setMenu(false); setSheet(false); setHow(false) } }
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      if (pickMode) { setPickMode(false); return }
+      setView(null); setMenu(false); setSheet(false); setHow(false)
+    }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
-  }, [])
+  }, [pickMode])
 
   const onHover = useCallback((hit, px) => {
     if (!hit) { setTip(null); return }
-    setTip({ c: hit.clan ? clanBy(hit.clan) : null, x: px.x, y: px.y, lat: hit.lat, lon: hit.lon })
+    setTip({ clan: hit.clan, x: px.x, y: px.y, lat: hit.lat, lon: hit.lon })
   }, [])
 
+  const onPickPoint = useCallback((lat, lon) => {
+    setCapital([lat, lon])
+    setPickMode(false)
+    toast(`Capital at ${lat.toFixed(2)}°, ${lon.toFixed(2)}°`)
+  }, [toast])
+
+  const startPick = useCallback(() => {
+    setPickMode(true)
+    toast('Click anywhere on the globe')
+  }, [toast])
+
   const results = q.trim().length
-    ? CLANS.filter((c) => (c.name + c.tag).toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8)
+    ? clans.filter((c) => (c.name + c.tag).toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8)
     : []
 
-  const visible = ticker.slice(tickI % ticker.length, (tickI % ticker.length) + 3)
+  const feed = events.length
+    ? events
+    : [{ id: 'g1', tag: 'GENESIS', text: 'the world is unclaimed' },
+      { id: 'g2', tag: 'GENESIS', text: `${stats.totalTiles || WORLD_TILES} tiles open, none taken` },
+      { id: 'g3', tag: 'GENESIS', text: 'the first clan founded picks first' }]
+  const visible = Array.from({ length: Math.min(3, feed.length) }, (_, i) => feed[(tickI + i) % feed.length])
+
+  const tipClan = tip?.clan ? clanBy(tip.clan) : null
 
   return (
     <div className="app">
-      <Globe onHover={onHover} onPick={(id) => go('clan', id)} focus={focus} paused={how} />
+      <Globe
+        tiles={tiles}
+        clans={clans}
+        onHover={onHover}
+        onPick={(id) => go('clan', id)}
+        onPickPoint={onPickPoint}
+        pickMode={pickMode}
+        marker={capital}
+        focus={focus}
+        paused={how}
+      />
 
       <div ref={tipRef} className={`gtip ${tip ? 'show' : ''}`} style={tip ? { left: tip.x, top: tip.y } : undefined}>
         {tip && (
           <>
-            {tip.c ? (
+            {tipClan ? (
               <>
                 <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
-                  <Crest tag={tip.c.tag} spec={tip.c.crest} size={22} />
-                  <span className="n">{tip.c.name}</span>
+                  <Crest tag={tipClan.tag} spec={tipClan.crest} size={22} />
+                  <span className="n">{tipClan.name}</span>
                 </div>
-                <div className="lbl" style={{ marginTop: 5 }}>
-                  [{tip.c.tag}] · {tip.c.land} tiles · lvl {tip.c.lvl}
-                </div>
+                <div className="lbl" style={{ marginTop: 5 }}>[{tipClan.tag}] · {tipClan.land} tiles · lvl {tipClan.lvl}</div>
               </>
             ) : (
-              <div className="n">Unclaimed</div>
+              <div className="n">{pickMode ? 'Plant the capital here' : 'Unclaimed'}</div>
             )}
-            <div className="lbl" style={{ marginTop: tip.c ? 2 : 5 }}>{tip.lat.toFixed(1)}°, {tip.lon.toFixed(1)}°</div>
+            <div className="lbl" style={{ marginTop: tipClan ? 2 : 5 }}>{tip.lat.toFixed(1)}°, {tip.lon.toFixed(1)}°</div>
           </>
         )}
       </div>
+
+      {pickMode && (
+        <div className="snapbar">Click the globe to plant your capital · Esc to cancel</div>
+      )}
 
       {/* -------- top bar -------- */}
       <div className="topbar">
@@ -197,10 +260,10 @@ export default function App() {
         </div>
 
         <div className="globalstats">
-          <div className="gstat"><span className="lbl">Clans</span><span className="v">{CLANS.length}</span></div>
-          <div className="gstat opt"><span className="lbl">Land</span><span className="v acc">{CLAIMED_PCT}%</span></div>
-          <div className="gstat"><span className="lbl">Wars</span><span className="v">{LIVE_WARS.length}</span></div>
-          <div className="gstat opt"><span className="lbl"><span className="livedot" /></span><span className="v">{WALLETS_LIVE} wallets</span></div>
+          <div className="gstat"><span className="lbl">Clans</span><span className="v">{stats.clans}</span></div>
+          <div className="gstat opt"><span className="lbl">Land</span><span className="v acc">{stats.claimedPct}%</span></div>
+          <div className="gstat"><span className="lbl">Wars</span><span className="v">{stats.liveWars}</span></div>
+          <div className="gstat opt"><span className="lbl"><span className="livedot" /></span><span className="v">{stats.wallets} wallets</span></div>
           <a className="gstat opt tokenlink" href={LAUNCHPAD.site} target="_blank" rel="noreferrer noopener">
             <span className="lbl">Token</span><span className="v gold">${TOKEN.symbol}</span>
           </a>
@@ -223,8 +286,11 @@ export default function App() {
           )}
         </div>
 
-        {wallet ? (
-          <span className="chainpill"><img src={wallet.logo} alt="" /> {wallet.name}</span>
+        {signedIn ? (
+          <button className="chainpill" title={me.address} onClick={() => { signOut(); toast('Signed out') }}>
+            <span className="livedot" style={{ margin: 0 }} />
+            {me.clan ? `[${me.clan.id.toUpperCase()}] ` : ''}{shortAddr(me.address)}
+          </button>
         ) : (
           <button className="btn solid small" onClick={() => setSheet(true)}>Connect</button>
         )}
@@ -234,14 +300,24 @@ export default function App() {
       <div className={`scrim ${menu ? 'show' : ''}`} onClick={() => setMenu(false)} />
       <aside className={`menu ${menu ? 'open' : ''}`}>
         <nav>
-          {NAV.map(([k, label, meta]) => (
+          {[
+            ['world', 'World map', `${stats.claimedPct}% claimed`],
+            ['found', 'Found a clan', me?.clan ? 'held' : 'open'],
+            ['directory', 'Clan directory', String(stats.clans)],
+            ['bounties', 'Bounties', `${stats.openBounties} open`],
+            ['wars', 'Wars', `${stats.liveWars} live`],
+            ['leaderboard', 'Leaderboard', ''],
+            ['token', 'Official token', `$${TOKEN.symbol}`],
+            ['rules', 'The rules', ''],
+            ['terms', 'Terms', ''],
+          ].map(([k, label, meta]) => (
             <button key={k} className={view === k ? 'on' : ''} onClick={() => go(k)}>
-              {label}
-              <span className="k">{meta()}</span>
+              {label}<span className="k">{meta}</span>
             </button>
           ))}
         </nav>
         <div className="foot">
+          {me?.clan && <button className="btn small" onClick={() => go('clan', me.clan.id)}>My clan</button>}
           <button className="btn small solid" onClick={() => { setMenu(false); setHow(true) }}>How it works</button>
           <a className="btn small ghost" href={CHAIN.docs} target="_blank" rel="noreferrer noopener">{CHAIN.name} docs</a>
         </div>
@@ -253,19 +329,21 @@ export default function App() {
           <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.4" /></svg>
         </button>
         <div className="panel-head">
-          <div className="panel-title">{view === 'clan' ? clanBy(clanId)?.name : TITLES[view] || ''}</div>
+          <div className="panel-title">{view === 'clan' ? clanBy(clanId)?.name ?? 'Clan' : TITLES[view] || ''}</div>
         </div>
         <div className="panel-body">
           {view === 'world' && <WorldMap go={go} />}
-          {view === 'found' && <Found toast={toast} />}
+          {view === 'found' && (
+            <Found toast={toast} go={go} capital={capital} pickMode={pickMode} onPickCapital={startPick} />
+          )}
           {view === 'directory' && <Directory go={go} toast={toast} />}
           {view === 'bounties' && <Bounties toast={toast} />}
-          {view === 'wars' && <Wars go={go} />}
+          {view === 'wars' && <Wars go={go} toast={toast} />}
           {view === 'leaderboard' && <Leaderboard go={go} />}
           {view === 'token' && <Token />}
           {view === 'rules' && <Rules />}
           {view === 'terms' && <Terms />}
-          {view === 'clan' && <ClanDetail id={clanId} toast={toast} focus={setFocus} />}
+          {view === 'clan' && <ClanDetail id={clanId} toast={toast} focus={setFocus} go={go} />}
         </div>
       </div>
 
@@ -274,36 +352,38 @@ export default function App() {
         {view ? (
           <>
             <span className="hero-kicker lbl">
-              {CHAIN.name} · coins on {LAUNCHPAD.name} · {TOTAL_LAND} / {WORLD_TILES} tiles taken
+              {CHAIN.name} · coins on {LAUNCHPAD.name} · {stats.takenTiles} / {stats.totalTiles || WORLD_TILES} tiles taken
             </span>
             <div className="hero-cta">
-              {!wallet && <button className="btn small solid" onClick={() => setSheet(true)}>Connect wallet</button>}
+              {!signedIn && <button className="btn small solid" onClick={() => setSheet(true)}>Connect wallet</button>}
               <button className="btn small" onClick={() => setHow(true)}>How it works</button>
             </div>
           </>
         ) : (
           <>
-            <div className="hero-kicker lbl">Genesis · {CHAIN.name} · {LAUNCHPAD.name}</div>
+            <div className="hero-kicker lbl">{stats.clans === 0 ? 'Genesis' : 'Live'} · {CHAIN.name} · {LAUNCHPAD.name}</div>
             <h1 className="hero-title">
               <span>Clans</span> <span>The&nbsp;World</span> <span>of</span> <span className="hero-fi">SocialFi</span>
             </h1>
             <p className="hero-sub">
               Social trading as a competitive game, run by the community. Nobody wins alone: wallets
               form clans, clans take land, clan coins launched on {LAUNCHPAD.name} earn the creator
-              rewards, wars settle the rest. The map is empty — the first clan takes first pick.
+              rewards, wars settle the rest.{stats.clans === 0 ? ' The map is empty — the first clan takes first pick.' : ''}
             </p>
             <div className="hero-chips">
               <span className="hero-chip"><img src={CHAIN.logo} alt="" style={{ height: 11 }} />{CHAIN.name}</span>
-              <span className="hero-chip"><b className="num">{CLANS.length}</b> clans founded</span>
-              <span className="hero-chip"><b className="num">{TOTAL_LAND}</b> / {WORLD_TILES} tiles taken</span>
-              <span className="hero-chip"><b className="num">{CLAIMED_PCT}%</b> of the world claimed</span>
+              <span className="hero-chip"><b className="num">{stats.clans}</b> clans</span>
+              <span className="hero-chip"><b className="num">{stats.takenTiles}</b> / {stats.totalTiles || WORLD_TILES} tiles taken</span>
+              <span className="hero-chip"><b className="num">{stats.wallets}</b> wallets</span>
             </div>
             <div className="hero-cta">
-              {!wallet
+              {!signedIn
                 ? <button className="btn solid" onClick={() => setSheet(true)}>Connect wallet</button>
-                : <button className="btn solid" onClick={() => go('found')}>Found the first clan</button>}
+                : me?.clan
+                  ? <button className="btn solid" onClick={() => go('clan', me.clan.id)}>My clan</button>
+                  : <button className="btn solid" onClick={() => go('found')}>{stats.clans === 0 ? 'Found the first clan' : 'Found a clan'}</button>}
               <button className="btn" onClick={() => setHow(true)}>How it works</button>
-              <button className="btn" onClick={() => go('rules')}>The rules</button>
+              <button className="btn" onClick={() => go('directory')}>Clan directory</button>
             </div>
           </>
         )}
@@ -311,25 +391,23 @@ export default function App() {
 
       {/* -------- ticker -------- */}
       <div className="ticker">
-        <span className="feedpill live"><i className="dot" /> {CHAIN.short} feed</span>
-        {visible.map((t, i) => (
-          <span className="item" key={`${tickI}-${i}`}>
-            <span className="lbl on">{t.tag}</span>
-            <span>{t.text}</span>
-            {t.delta !== null && (
-              <span className={t.delta > 0 ? 'up' : 'down'}>{t.delta > 0 ? '+' : ''}{t.delta} {CHAIN.gas}</span>
-            )}
+        <span className={`feedpill ${status === 'live' ? 'live' : status === 'offline' ? 'off' : 'snap'}`}>
+          <i className="dot" /> {status === 'live' ? `${CHAIN.short} world live` : status === 'offline' ? 'World offline' : 'Connecting'}
+        </span>
+        {visible.map((e, i) => (
+          <span className="item" key={`${e.id}-${i}`}>
+            {e.tag && <span className="lbl on">{e.tag}</span>}
+            <span>{e.text}</span>
           </span>
         ))}
-        <span className="fps" style={{ marginLeft: 'auto' }}>{TOTAL_LAND}/{WORLD_TILES} tiles held</span>
+        <span className="fps" style={{ marginLeft: 'auto' }}>{stats.takenTiles}/{stats.totalTiles || WORLD_TILES} tiles held</span>
       </div>
 
-      {/* -------- toasts -------- */}
       <div className="toasts">
         {toasts.map((t) => <div className="toast" key={t.id}>{t.text}</div>)}
       </div>
 
-      {sheet && <WalletSheet onClose={() => setSheet(false)} onConnect={(w) => { setWallet(w); setSheet(false); toast(`${w.name} connected`) }} />}
+      {sheet && <WalletSheet onClose={() => setSheet(false)} toast={toast} />}
       {how && <HowItWorks onClose={() => setHow(false)} />}
 
       <div className={`boot ${booted ? 'gone' : ''}`}>
@@ -337,10 +415,26 @@ export default function App() {
           <div className="wordmark" style={{ fontSize: 30 }}>
             <span className="wm-word">{SITE.name}<i className="wm-tld">{SITE.tld}</i></span>
           </div>
-          <div className="lbl" style={{ marginTop: 8 }}>Reading {CHAIN.name}</div>
+          <div className="lbl" style={{ marginTop: 8 }}>Reading the world</div>
           <div className="bootbar"><i style={{ width: booted ? '100%' : '35%' }} /></div>
         </div>
       </div>
     </div>
+  )
+}
+
+/* ---------------- App ---------------- */
+export default function App() {
+  const [toasts, setToasts] = useState([])
+  const toast = useCallback((text) => {
+    const id = Math.random().toString(36).slice(2)
+    setToasts((t) => [...t, { id, text }])
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200)
+  }, [])
+
+  return (
+    <WorldProvider onToast={toast}>
+      <Shell toast={toast} toasts={toasts} />
+    </WorldProvider>
   )
 }

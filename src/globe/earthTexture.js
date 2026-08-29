@@ -3,8 +3,8 @@
    hairline coast, a faint graticule. Nothing else competes with the clans. */
 
 const COL = {
-  ocean: '#0c141d',
-  land: '#3d362d',
+  ocean: '#0a1017',
+  land: '#4a4136',
   coast: 'rgba(255,140,60,0.7)',
   grat: 'rgba(244,241,236,0.055)',
   gratMajor: 'rgba(255,106,0,0.14)',
