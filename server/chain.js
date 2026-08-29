@@ -1,10 +1,11 @@
 /* Everything this server reads from Robinhood Chain.
 
-   Two jobs:
+   Three jobs:
      - verify that a clan coin really was launched on Pons by the wallet
        that claims it, from the transaction receipt
-     - count war scores from real trades, straight out of the bonding-curve
-       logs, so nobody types their own number in */
+     - read every trade a wallet has made on a Pons bonding curve
+     - value what a wallet still holds, so profit counts the position it is
+       sitting on and not only what it has cashed out */
 
 import { createPublicClient, http, parseEventLogs, formatEther, getAddress } from 'viem'
 import { PONS, factoryAbi, curveEvents, erc20Abi } from '../src/lib/pons.js'
@@ -17,6 +18,23 @@ export const client = createPublicClient({
 })
 
 export const head = () => client.getBlockNumber()
+
+const LAUNCHED = factoryAbi.find((e) => e.type === 'event' && e.name === 'TokenLaunched')
+const BUY = curveEvents.find((e) => e.name === 'CurveBuy')
+const SELL = curveEvents.find((e) => e.name === 'CurveSell')
+
+const balanceOfAbi = [{
+  type: 'function', name: 'balanceOf', stateMutability: 'view',
+  inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }],
+}]
+
+const reservesAbi = [
+  {
+    type: 'function', name: 'getReserves', stateMutability: 'view', inputs: [],
+    outputs: [{ name: 'quoteReserve', type: 'uint256' }, { name: 'tokenReserve', type: 'uint256' }],
+  },
+  { type: 'function', name: 'realQuoteReserve', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+]
 
 /* ------------------------------------------------------------------
    Launch verification
@@ -40,60 +58,55 @@ export async function verifyLaunch(txHash, expectedDeployer) {
     symbol = await client.readContract({ address: token, abi: erc20Abi, functionName: 'symbol' })
   } catch { /* a token without a readable symbol still counts */ }
 
-  return {
-    token,
-    curve: getAddress(mine.args.curve),
-    symbol,
-    blockNumber: receipt.blockNumber,
-  }
+  return { token, curve: getAddress(mine.args.curve), symbol, blockNumber: receipt.blockNumber }
 }
 
 /* ------------------------------------------------------------------
-   War scoring
+   Which curves are real.
 
-   CurveBuy and CurveSell carry the trader in an indexed field, so the
-   whole roster can be filtered in one query per chunk. A wallet's score
-   is what it took out minus what it put in, in ETH.
-
-   Anyone can deploy a contract that emits the same events, so every
-   emitting address is checked against a real TokenLaunched from the Pons
-   factory before it counts.
+   Anyone can deploy a contract that emits the same event names, so an
+   emitting address only counts once the Pons factory says it launched it.
+   The answer also carries the token, which is what a balance is read from.
    ------------------------------------------------------------------ */
-const BUY = curveEvents.find((e) => e.name === 'CurveBuy')
-const SELL = curveEvents.find((e) => e.name === 'CurveSell')
-
-const genuineCurve = new Map()
-export async function isPonsCurve(address) {
+const curveCache = new Map()
+export async function curveInfo(address) {
   const key = getAddress(address)
-  if (genuineCurve.has(key)) return genuineCurve.get(key)
-  let ok = false
+  if (curveCache.has(key)) return curveCache.get(key)
+  let info = null
   try {
     const logs = await client.getLogs({
-      address: PONS.factory,
-      event: factoryAbi.find((e) => e.type === 'event' && e.name === 'TokenLaunched'),
-      args: { curve: key },
-      fromBlock: 0n,
-      toBlock: 'latest',
+      address: PONS.factory, event: LAUNCHED, args: { curve: key },
+      fromBlock: 0n, toBlock: 'latest',
     })
-    ok = logs.length > 0
+    if (logs.length) info = { curve: key, token: getAddress(logs[0].args.token) }
   } catch {
-    // If the node refuses the range we must not guess — treat it as unproven.
-    ok = false
+    // If the node refuses the range we must not guess: leave it unproven.
+    info = null
   }
-  genuineCurve.set(key, ok)
-  return ok
+  curveCache.set(key, info)
+  return info
 }
 
+export const isPonsCurve = async (address) => Boolean(await curveInfo(address))
+
+/* ------------------------------------------------------------------
+   Trades
+
+   Both curve events carry the trader in an indexed field, so one query
+   covers a whole roster. Buys are money out, sells are money in, and the
+   pair of them is what a position is measured against.
+   ------------------------------------------------------------------ */
 const MAX_SPAN = 4000n // blocks per getLogs call
 
-/* Returns wei deltas keyed by lowercased wallet address. */
 export async function scanTrades(wallets, fromBlock, toBlock) {
-  const totals = new Map()
-  if (!wallets.length || toBlock <= fromBlock) return { totals, scannedTo: fromBlock }
+  const totals = new Map() // address -> { net, spent, recv, trades }
+  const positions = new Map() // `${address}|${curve}` -> { address, curve, token }
+  if (!wallets.length || toBlock <= fromBlock) return { totals, positions, scannedTo: fromBlock }
 
-  const add = (addr, wei) => {
+  const touch = (addr) => {
     const k = addr.toLowerCase()
-    totals.set(k, (totals.get(k) ?? 0n) + wei)
+    if (!totals.has(k)) totals.set(k, { net: 0n, spent: 0n, recv: 0n, trades: 0 })
+    return totals.get(k)
   }
 
   let cursor = fromBlock
@@ -105,18 +118,57 @@ export async function scanTrades(wallets, fromBlock, toBlock) {
     ])
 
     for (const log of buys) {
-      if (!(await isPonsCurve(log.address))) continue
-      add(log.args.buyer, -log.args.quoteIn)
+      const info = await curveInfo(log.address)
+      if (!info) continue
+      const row = touch(log.args.buyer)
+      row.net -= log.args.quoteIn
+      row.spent += log.args.quoteIn
+      row.trades++
+      positions.set(`${log.args.buyer.toLowerCase()}|${info.curve}`, { address: log.args.buyer, ...info })
     }
     for (const log of sells) {
-      if (!(await isPonsCurve(log.address))) continue
-      add(log.args.seller, log.args.quoteOut)
+      const info = await curveInfo(log.address)
+      if (!info) continue
+      const row = touch(log.args.seller)
+      row.net += log.args.quoteOut
+      row.recv += log.args.quoteOut
+      row.trades++
+      positions.set(`${log.args.seller.toLowerCase()}|${info.curve}`, { address: log.args.seller, ...info })
     }
 
     cursor = end
   }
 
-  return { totals, scannedTo: toBlock }
+  return { totals, positions, scannedTo: toBlock }
+}
+
+/* ------------------------------------------------------------------
+   What a position is worth right now.
+
+   A wallet that bought and is still holding has spent money and taken
+   none back: counting only realised trades reports it as a loss. This
+   values the tokens it still holds at what the curve would pay to sell
+   them, capped by what the curve can actually pay out.
+   ------------------------------------------------------------------ */
+export async function valuePosition({ address, token, curve }) {
+  const balance = await client.readContract({
+    address: token, abi: balanceOfAbi, functionName: 'balanceOf', args: [address],
+  })
+  if (balance === 0n) return 0n
+
+  const [quoteReserve, tokenReserve] = await client.readContract({
+    address: curve, abi: reservesAbi, functionName: 'getReserves',
+  })
+  if (tokenReserve === 0n) return 0n
+
+  // Constant product: what selling the whole balance would return.
+  const out = (quoteReserve * balance) / (tokenReserve + balance)
+
+  let real = out
+  try {
+    real = await client.readContract({ address: curve, abi: reservesAbi, functionName: 'realQuoteReserve' })
+  } catch { /* graduated curves may not expose it */ }
+  return out < real ? out : real
 }
 
 export const toEth = (wei) => Number(formatEther(wei))

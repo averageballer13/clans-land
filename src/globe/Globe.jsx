@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { buildEarthMap } from './earthTexture.js'
+import { crestSvg } from '../ui/crestArt.js'
 
 const R = 1
 const DEG = Math.PI / 180
@@ -114,46 +115,66 @@ function buildTileLayers(tiles, colourOf, { lift = 1.003, fillOpacity = 0.24, ed
    horizon, and a banner carrying the tag, the motto and what the clan has
    made. Drawn to a canvas and hung on a sprite so it always faces the reader,
    whichever way the world has turned. */
+function drawFlag(c, clan, W, H) {
+  const pnl = clan.pnl ?? 0
+  const money = `${pnl > 0 ? '+' : ''}${pnl.toFixed(3)} ETH`
+  const left = 176 // the crest sits in its own panel on the left
+
+  c.clearRect(0, 0, W, H)
+  c.fillStyle = 'rgba(8,9,11,0.9)'
+  c.fillRect(0, 0, W, H)
+  c.fillStyle = clan.paint
+  c.fillRect(0, 0, 10, H)
+  c.strokeStyle = clan.paint
+  c.lineWidth = 3
+  c.strokeRect(1.5, 1.5, W - 3, H - 3)
+  // a hairline between the crest and the writing
+  c.strokeStyle = 'rgba(244,241,236,0.16)'
+  c.lineWidth = 2
+  c.beginPath(); c.moveTo(left - 14, 18); c.lineTo(left - 14, H - 18); c.stroke()
+
+  c.textBaseline = 'middle'
+  c.fillStyle = '#f4f1ec'
+  c.font = '700 58px "Space Grotesk", "Segoe UI", sans-serif'
+  c.fillText(clan.tag, left, 48)
+
+  c.fillStyle = clan.paint
+  c.font = '600 28px "Outfit", "Segoe UI", sans-serif'
+  c.fillText(`LVL ${clan.lvl}  ·  ${clan.land} TILES`, left, 98)
+
+  if (clan.motto) {
+    c.fillStyle = '#9aa1a9'
+    c.font = 'italic 28px "Fraunces", Georgia, serif'
+    const motto = clan.motto.length > 26 ? clan.motto.slice(0, 25) + '…' : clan.motto
+    c.fillText(motto, left, 140)
+  }
+
+  c.fillStyle = pnl > 0 ? '#2ec27e' : pnl < 0 ? '#e14b62' : '#676e77'
+  c.font = '700 36px "Space Grotesk", "Segoe UI", sans-serif'
+  c.fillText(money, left, 184)
+}
+
 function flagTexture(clan) {
-  const W = 512, H = 216
+  const W = 560, H = 216
   const cv = document.createElement('canvas')
   cv.width = W
   cv.height = H
   const c = cv.getContext('2d')
-
-  const pnl = clan.pnl ?? 0
-  const money = `${pnl > 0 ? '+' : ''}${pnl.toFixed(3)} ETH`
-
-  c.fillStyle = 'rgba(8,9,11,0.88)'
-  c.fillRect(0, 0, W, H)
-  c.fillStyle = clan.paint
-  c.fillRect(0, 0, 12, H)
-  c.strokeStyle = clan.paint
-  c.lineWidth = 3
-  c.strokeRect(1.5, 1.5, W - 3, H - 3)
-
-  c.textBaseline = 'middle'
-  c.fillStyle = '#f4f1ec'
-  c.font = '700 62px "Space Grotesk", "Segoe UI", sans-serif'
-  c.fillText(clan.tag, 34, 52)
-
-  c.fillStyle = clan.paint
-  c.font = '600 30px "Outfit", "Segoe UI", sans-serif'
-  c.fillText(`LVL ${clan.lvl}  ·  ${clan.land} TILES`, 34, 104)
-
-  if (clan.motto) {
-    c.fillStyle = '#9aa1a9'
-    c.font = 'italic 30px "Fraunces", Georgia, serif'
-    const motto = clan.motto.length > 34 ? clan.motto.slice(0, 33) + '…' : clan.motto
-    c.fillText(motto, 34, 146)
-  }
-
-  c.fillStyle = pnl > 0 ? '#2ec27e' : pnl < 0 ? '#e14b62' : '#676e77'
-  c.font = '700 38px "Space Grotesk", "Segoe UI", sans-serif'
-  c.fillText(money, 34, 188)
+  drawFlag(c, clan, W, H)
 
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
+
+  /* The crest is an SVG, so it arrives a frame later. Draw it in when it
+     loads and mark the texture for upload. */
+  const img = new Image()
+  img.onload = () => {
+    const box = 128
+    c.drawImage(img, 22, (H - box) / 2, (box * img.width) / img.height, box)
+    tex.needsUpdate = true
+  }
+  img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(crestSvg(clan.crest, 128))))
+
   return tex
 }
 
@@ -181,7 +202,7 @@ function buildFlags(clans) {
     const banner = new THREE.Sprite(new THREE.SpriteMaterial({
       map: flagTexture(c), transparent: true, depthWrite: false, depthTest: true,
     }))
-    banner.scale.set(0.2, 0.084, 1)
+    banner.scale.set(0.23, 0.089, 1)
     // Hung off one side of the mast, like a flag rather than a label.
     banner.position.copy(top)
     banner.center.set(-0.03, 0.9)
@@ -233,7 +254,7 @@ function disposeTree(obj) {
   })
 }
 
-export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickPoint, pickMode = false, marker = null, focus, paused }) {
+export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickPoint, pickMode = false, marker = null, focus, zoom, paused }) {
   const ref = useRef(null)
   const api = useRef({})
 
@@ -408,10 +429,14 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
     ro.observe(canvas)
 
     api.current.flyTo = (lat, lon, zoom = 2.1) => {
-      targetY = -(lon + 180) * DEG - Math.PI / 2
+      /* Turn the world so this point faces the camera. llToVec puts a point at
+         t = (lon + 180)deg around Y, and the camera looks down +Z, so the world
+         has to sit at pi/2 - t. The old sign put the far side in view. */
+      targetY = Math.PI / 2 - (lon + 180) * DEG
       targetX = THREE.MathUtils.clamp(lat * DEG, -1.25, 1.25)
       targetDist = zoom
     }
+    api.current.setZoom = (d) => { targetDist = THREE.MathUtils.clamp(d, 1.45, 5.2) }
     api.current.setMarker = (ll) => {
       if (!ll) { pin.visible = false; return }
       const at = llToVec(ll[0], ll[1], R * 1.01)
@@ -509,6 +534,7 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
   useEffect(() => { api.current.tiles = tiles }, [tiles])
   useEffect(() => { api.current.setMarker?.(marker) }, [marker])
   useEffect(() => { if (focus && api.current.flyTo) api.current.flyTo(focus[0], focus[1], focus[2] ?? 2.1) }, [focus])
+  useEffect(() => { if (zoom != null) api.current.setZoom?.(zoom) }, [zoom])
 
   /* ---- land and flags, rebuilt whenever the shared world changes ---- */
   useEffect(() => {

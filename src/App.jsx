@@ -199,102 +199,60 @@ function WalletSheet({ onClose, toast }) {
   )
 }
 
-/* ---------------- The map menu ----------------
+/* ---------------- Map mode ----------------
 
-   One screen with everything in it, grouped the way a player thinks about it:
-   the world, their clan, the money, the rules. Every entry carries what it is
-   worth right now, so the menu doubles as the scoreboard. */
-function MapMenu({ onClose, go, world, onConnect }) {
+   Everything else clears off, the camera comes in, and the world is left
+   alone with one bar across the top: where to go, what it is worth, and the
+   one thing this wallet should do next. */
+function MapBar({ world, go, view, onExit, onConnect }) {
   const { stats, me, signedIn, clans, players } = world
   const myClan = me?.clan ? clans.find((c) => c.id === me.clan.id) : null
-  const top = clans[0]
-  const topPlayer = players?.[0]
   const eth = (n) => `${n > 0 ? '+' : ''}${Number(n || 0).toFixed(3)}`
+  const topPlayer = players?.find((p) => p.trades > 0)
 
-  const groups = [
-    {
-      title: 'The world',
-      items: [
-        { k: 'world', icon: 'globe', label: 'World map', meta: `${stats.claimedPct}% claimed`,
-          note: `${stats.takenTiles} of ${stats.totalTiles || WORLD_TILES} tiles taken` },
-        { k: 'directory', icon: 'banner', label: 'Clan directory', meta: String(stats.clans),
-          note: stats.clans ? `led by ${top?.name}` : 'nobody has founded one' },
-        { k: 'leaderboard', icon: 'crown', label: 'Leaderboards', meta: 'clans · players',
-          note: topPlayer?.trades ? `${topPlayer.handle} leads on ${eth(topPlayer.pnl)} ETH` : 'no trades counted yet' },
-      ],
-    },
-    {
-      title: myClan ? `Your clan · ${myClan.tag}` : 'Your clan',
-      items: [
-        myClan
-          ? { k: 'clan', id: myClan.id, icon: 'shield', label: myClan.name, meta: `lvl ${myClan.lvl}`,
-              note: `${myClan.members} wallets · ${myClan.land} tiles · ${eth(myClan.pnl)} ETH` }
-          : { k: 'found', icon: 'flag', label: 'Found a clan', meta: 'open',
-              note: 'plant a capital and paint the map' },
-        { k: 'wars', icon: 'swords', label: 'Wars', meta: `${stats.liveWars} live`,
-          note: 'net ETH decides, the winner takes land' },
-        { k: 'bounties', icon: 'target', label: 'Bounties', meta: `${stats.openBounties} open`,
-          note: 'pay someone, wallet to wallet' },
-      ],
-    },
-    {
-      title: 'The coin',
-      items: [
-        { k: 'token', icon: 'coin', label: `$${TOKEN.symbol}`, meta: 'not deployed',
-          note: `the house coin, launching on ${LAUNCHPAD.name}` },
-      ],
-    },
-    {
-      title: 'How it runs',
-      items: [
-        { k: 'how', icon: 'compass', label: 'How it works', meta: '5 steps', note: 'the whole game in a minute' },
-        { k: 'rules', icon: 'book', label: 'The rules', meta: '', note: 'land, wars, levels, rewards' },
-        { k: 'terms', icon: 'scroll', label: 'Terms', meta: '', note: 'what this is, and what it is not' },
-      ],
-    },
+  const items = [
+    { k: 'directory', icon: 'banner', label: 'Clans', meta: String(stats.clans) },
+    { k: 'leaderboard', icon: 'crown', label: 'Leaderboard', meta: topPlayer ? eth(topPlayer.pnl) : '—' },
+    { k: 'wars', icon: 'swords', label: 'Wars', meta: `${stats.liveWars}` },
+    { k: 'bounties', icon: 'target', label: 'Bounties', meta: `${stats.openBounties}` },
+    { k: 'token', icon: 'coin', label: `$${TOKEN.symbol}`, meta: '' },
+    { k: 'rules', icon: 'book', label: 'Rules', meta: '' },
   ]
 
   return (
-    <div className="mapwrap" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="mapmenu">
-        <div className="maphead">
-          <div>
-            <span className="lbl">{CHAIN.name} · chain {CHAIN.id}</span>
-            <h2><img className="wm-mark" src="/brand/clans-mark.svg" alt="" style={{ height: 26 }} />{SITE.name}<i className="wm-tld">{SITE.tld}</i></h2>
-          </div>
-          <div className="mapstats">
-            <div className="mapstat"><span className="lbl">Clans</span><b className="num">{stats.clans}</b></div>
-            <div className="mapstat"><span className="lbl">Tiles</span><b className="num">{stats.takenTiles}</b></div>
-            <div className="mapstat"><span className="lbl">Wallets</span><b className="num">{stats.wallets}</b></div>
-            <div className="mapstat"><span className="lbl">Traders</span><b className="num">{stats.traders ?? 0}</b></div>
-          </div>
-          <button className="wclose" onClick={onClose} aria-label="Close"><Icon name="close" size={14} /></button>
-        </div>
+    <div className="mapbar">
+      <button className="mapexit" onClick={onExit} title="Leave the map">
+        <Icon name="close" size={15} />
+      </button>
 
-        <div className="mapgroups">
-          {groups.map((g) => (
-            <section key={g.title} className="mapgroup">
-              <div className="lbl">{g.title}</div>
-              {g.items.map((it) => (
-                <button key={it.label} className="maprow" onClick={() => { onClose(); go(it.k, it.id) }}>
-                  <span className="mapicon"><Icon name={it.icon} size={19} /></span>
-                  <span className="maptext">
-                    <b>{it.label}</b>
-                    <span>{it.note}</span>
-                  </span>
-                  {it.meta && <span className="mapmeta">{it.meta}</span>}
-                </button>
-              ))}
-            </section>
-          ))}
-        </div>
+      <div className="mapbrand">
+        <img className="wm-mark" src="/brand/clans-mark.svg" alt="" />
+        <span className="wm-word">{SITE.name}<i className="wm-tld">{SITE.tld}</i></span>
+      </div>
 
-        <div className="mapfoot">
-          {!signedIn
-            ? <button className="btn small solid" onClick={() => { onClose(); onConnect() }}>Connect wallet</button>
-            : <span className="lbl">Signed in as {shortAddr(me.address)}</span>}
-          <span className="lbl">Drag the globe · click a territory to open its clan</span>
-        </div>
+      <nav className="mapnav">
+        {items.map((it) => (
+          <button key={it.k} className={`maptab ${view === it.k ? 'on' : ''}`} onClick={() => go(it.k)}>
+            <Icon name={it.icon} size={16} />
+            <span>{it.label}</span>
+            {it.meta && <b>{it.meta}</b>}
+          </button>
+        ))}
+      </nav>
+
+      <div className="mapright">
+        <span className="mapcount"><b className="num">{stats.takenTiles}</b><span className="lbl">/ {stats.totalTiles || WORLD_TILES} tiles</span></span>
+        {!signedIn ? (
+          <button className="btn small solid" onClick={onConnect}>Connect</button>
+        ) : myClan ? (
+          <button className="btn small solid" onClick={() => go('clan', myClan.id)}>
+            <Icon name="shield" size={14} /> {myClan.tag} · {eth(myClan.pnl)}
+          </button>
+        ) : (
+          <button className="btn small solid" onClick={() => go('found')}>
+            <Icon name="flag" size={14} /> Create a clan
+          </button>
+        )}
       </div>
     </div>
   )
@@ -314,7 +272,7 @@ function Shell({ toast, toasts }) {
   const [focus, setFocus] = useState(null)
   const [q, setQ] = useState('')
   const [booted, setBooted] = useState(false)
-  const [mapOpen, setMapOpen] = useState(false)
+  const [mapMode, setMapMode] = useState(false)
   const [pickMode, setPickMode] = useState(false)
   const [capital, setCapital] = useState(null)
   const [tickI, setTickI] = useState(0)
@@ -335,17 +293,18 @@ function Shell({ toast, toasts }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'm' && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName ?? '')) {
-        setMapOpen((o) => !o)
+        setMapMode((o) => !o)
         return
       }
       if (e.key !== 'Escape') return
       if (pickMode) { setPickMode(false); return }
-      if (mapOpen) { setMapOpen(false); return }
-      setView(null); setMenu(false); setSheet(false); setHow(false)
+      if (view) { setView(null); return }
+      if (mapMode) { setMapMode(false); return }
+      setMenu(false); setSheet(false); setHow(false)
     }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
-  }, [pickMode, mapOpen])
+  }, [pickMode, mapMode, view])
 
   const onHover = useCallback((hit, px) => {
     if (!hit) { setTip(null); return }
@@ -387,10 +346,11 @@ function Shell({ toast, toasts }) {
         pickMode={pickMode}
         marker={capital}
         focus={focus}
+        zoom={mapMode ? 1.85 : 3.05}
         paused={how}
       />
 
-      <div ref={tipRef} className={`gtip ${tip && !sheet && !how && !mapOpen ? 'show' : ''}`} style={tip ? { left: tip.x, top: tip.y } : undefined}>
+      <div ref={tipRef} className={`gtip ${tip && !sheet && !how ? 'show' : ''}`} style={tip ? { left: tip.x, top: tip.y } : undefined}>
         {tip && (
           <>
             {tipClan ? (
@@ -414,7 +374,7 @@ function Shell({ toast, toasts }) {
       )}
 
       {/* -------- top bar -------- */}
-      <div className="topbar">
+      <div className="topbar" hidden={mapMode}>
         <button className="menubtn" onClick={() => setMenu((m) => !m)} aria-label="Menu">
           <svg width="18" height="14" viewBox="0 0 18 14">
             <line x1="1" y1="2" x2="17" y2="2" />
@@ -430,10 +390,6 @@ function Shell({ toast, toasts }) {
             <img src={CHAIN.logo} alt={CHAIN.name} title={`Built on ${CHAIN.name}`} />
           </span>
         </div>
-
-        <button className="btn small openmap" onClick={() => setMapOpen(true)}>
-          <Icon name="globe" size={14} /> Open map
-        </button>
 
         <div className="globalstats">
           <div className="gstat"><span className="lbl">Clans</span><span className="v">{stats.clans}</span></div>
@@ -524,7 +480,7 @@ function Shell({ toast, toasts }) {
       </div>
 
       {/* -------- hero -------- */}
-      <div className={`hero ${view ? 'compact' : ''}`}>
+      <div className={`hero ${view ? 'compact' : ''}`} hidden={mapMode}>
         {view ? (
           <>
             <span className="hero-kicker lbl">
@@ -553,12 +509,14 @@ function Shell({ toast, toasts }) {
               <span className="hero-chip"><b className="num">{stats.wallets}</b> wallets</span>
             </div>
             <div className="hero-cta">
+              <button className="btn solid big openmap" onClick={() => setMapMode(true)}>
+                <Icon name="globe" size={18} /> Open the map
+              </button>
               {!signedIn
-                ? <button className="btn solid" onClick={() => setSheet(true)}>Connect wallet</button>
+                ? <button className="btn" onClick={() => setSheet(true)}>Connect wallet</button>
                 : me?.clan
-                  ? <button className="btn solid" onClick={() => go('clan', me.clan.id)}>My clan</button>
-                  : <button className="btn solid" onClick={() => go('found')}>{stats.clans === 0 ? 'Found the first clan' : 'Found a clan'}</button>}
-              <button className="btn" onClick={() => setMapOpen(true)}><Icon name="globe" size={14} /> Open map</button>
+                  ? <button className="btn" onClick={() => go('clan', me.clan.id)}>My clan</button>
+                  : <button className="btn" onClick={() => go('found')}>{stats.clans === 0 ? 'Found the first clan' : 'Found a clan'}</button>}
               <button className="btn" onClick={() => setHow(true)}>How it works</button>
             </div>
           </>
@@ -566,7 +524,7 @@ function Shell({ toast, toasts }) {
       </div>
 
       {/* -------- ticker -------- */}
-      <div className="ticker">
+      <div className="ticker" hidden={mapMode}>
         <span className={`feedpill ${status === 'live' ? 'live' : status === 'offline' ? 'off' : 'snap'}`}>
           <i className="dot" /> {status === 'live' ? `${CHAIN.short} world live` : status === 'offline' ? 'World offline' : 'Connecting'}
         </span>
@@ -583,11 +541,12 @@ function Shell({ toast, toasts }) {
         {toasts.map((t) => <div className="toast" key={t.id}>{t.text}</div>)}
       </div>
 
-      {mapOpen && (
-        <MapMenu
+      {mapMode && (
+        <MapBar
           world={world}
           go={go}
-          onClose={() => setMapOpen(false)}
+          view={view}
+          onExit={() => { setMapMode(false); setView(null) }}
           onConnect={() => setSheet(true)}
         />
       )}

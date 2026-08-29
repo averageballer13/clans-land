@@ -602,6 +602,30 @@ export function Found({ toast, capital, pickMode, onPickCapital, go }) {
             </div>
           </div>
           <div className="sd-row">
+            <span className="lbl">Second ink</span>
+            <div className="sd-opts">
+              {CREST_INKS.map((i) => (
+                <button key={i} className={`swatch ${spec.ink2 === i ? 'on' : ''}`} onClick={() => set('ink2')(i)}>
+                  <span style={{ background: i }} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sd-row">
+            <span className="lbl">Emblem colour</span>
+            <div className="sd-opts">
+              <button className={`swatch ${(spec.chargeInk ?? 'auto') === 'auto' ? 'on' : ''}`}
+                onClick={() => set('chargeInk')('auto')} title="Pick whatever reads best">
+                <span style={{ background: 'linear-gradient(135deg,#f4f1ec 50%,#08090b 50%)' }} />
+              </button>
+              {CREST_INKS.map((i) => (
+                <button key={i} className={`swatch ${spec.chargeInk === i ? 'on' : ''}`} onClick={() => set('chargeInk')(i)}>
+                  <span style={{ background: i }} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sd-row">
             <span className="lbl">Ground</span>
             <div className="sd-opts">
               {CREST_GROUNDS.map((i) => (
@@ -610,6 +634,11 @@ export function Found({ toast, capital, pickMode, onPickCapital, go }) {
                 </button>
               ))}
             </div>
+          </div>
+          <div className="sd-row">
+            <span className="lbl">Emblem size</span>
+            <input className="slider" type="range" min="0.6" max="1.4" step="0.05"
+              value={spec.scale ?? 1} onChange={(e) => set('scale')(Number(e.target.value))} />
           </div>
         </div>
       </div>

@@ -81,10 +81,58 @@ check('found wallets trading on Pons right now', traders.length > 0, `${traders.
 
 if (traders.length) {
   const { totals, scannedTo } = await scanTrades(traders, to - 3000n, to)
-  const lines = [...totals.entries()].map(([a, wei]) => `${a.slice(0, 8)}… ${toEth(wei).toFixed(6)} ETH`)
+  const lines = [...totals.entries()].map(([a, r]) => `${a.slice(0, 8)}… ${toEth(r.net).toFixed(6)} ETH`)
   check('the scanner returns a net ETH figure per wallet', totals.size > 0, lines.join(' | ') || 'no trades in window')
   check('the scanner reports how far it got', scannedTo === to)
 }
 
+/* Holdings: a wallet that bought and is still holding must not read as a pure
+   loss. Walk recent buys until one turns up that still holds the token, and
+   price what it is sitting on. */
+{
+  const { valuePosition, curveInfo } = await import('../server/chain.js')
+  const { formatEther: fmt } = await import('viem')
+  const balanceAbi = [{
+    type: 'function', name: 'balanceOf', stateMutability: 'view',
+    inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }],
+  }]
+
+  let holder = null
+  let anyCurve = null
+  for (let span = 0; span < 14 && !holder; span++) {
+    const upto = to - BigInt(span * 2000)
+    const logs = await client.getLogs({ event: buyEvent, fromBlock: upto - 2000n, toBlock: upto })
+    for (const l of logs) {
+      const info = await curveInfo(l.address)
+      if (!info) continue
+      anyCurve = anyCurve ?? info
+      const bal = await client.readContract({
+        address: info.token, abi: balanceAbi, functionName: 'balanceOf', args: [l.args.buyer],
+      })
+      if (bal > 0n) { holder = { ...info, address: l.args.buyer, spent: l.args.quoteIn }; break }
+    }
+  }
+
+  check('found a wallet still holding what it bought', !!holder,
+    holder ? `${holder.address.slice(0, 8)}\u2026 on ${holder.token.slice(0, 10)}\u2026` : 'everyone had sold out')
+
+  if (holder) {
+    const held = await valuePosition(holder)
+    check('its open position is priced above zero', held > 0n,
+      `${fmt(held)} ETH held against ${fmt(holder.spent)} ETH put into that buy`)
+    check('so profit is better than the trades alone would show',
+      held > 0n && held - holder.spent > -holder.spent,
+      `trades alone say ${fmt(-holder.spent)} ETH, holdings included ${fmt(held - holder.spent)} ETH`)
+  }
+
+  if (anyCurve) {
+    const nobody = await valuePosition({
+      address: '0x000000000000000000000000000000000000dEaD', token: anyCurve.token, curve: anyCurve.curve,
+    })
+    check('an address holding nothing is worth nothing', nobody === 0n, String(nobody))
+  }
+}
+
 console.log(`\n${failures === 0 ? 'all checks passed' : failures + ' check(s) failed'}\n`)
 process.exit(failures === 0 ? 0 : 1)
+

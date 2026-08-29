@@ -18,7 +18,10 @@ import {
   readWorld, grantTiles, reconcileLand, settleDueWars, newId, tileAt,
   landFor, addXp, PAINTS, CLAN_MAX,
 } from './world.js'
-import { verifyLaunch, scanTrades, head, toEth, CHAIN_ID } from './chain.js'
+import { verifyLaunch, scanTrades, valuePosition, head, toEth, CHAIN_ID } from './chain.js'
+import {
+  CREST_SHAPES, CREST_FIELDS, CREST_CHARGES, CREST_INKS, CREST_GROUNDS,
+} from '../src/ui/crestArt.js'
 
 export const SERVERLESS = Boolean(process.env.VERCEL || process.env.SERVERLESS)
 
@@ -214,15 +217,20 @@ const ENTRIES = new Set(['public', 'private'])
 
 function validateCrest(c) {
   const hex = /^#[0-9a-fA-F]{6}$/
-  const shapes = new Set(['heater', 'kite', 'banner', 'hex', 'rondel', 'lozenge', 'pennon', 'tower'])
-  const fields = new Set(['plain', 'pale', 'fess', 'bend', 'chevron', 'quarterly', 'saltire', 'bordure', 'gyronny'])
-  const charges = new Set(['feather', 'bull', 'bolt', 'anvil', 'eye', 'chain', 'crown', 'wolf', 'candle', 'compass', 'blade', 'none'])
-  if (!c || !shapes.has(c.shape) || !fields.has(c.field) || !charges.has(c.charge)) return null
-  if (!hex.test(c.ink || '') || !hex.test(c.ink2 || '') || !hex.test(c.ground || '')) return null
+  if (!c) return null
+  if (!CREST_SHAPES.includes(c.shape)) return null
+  if (!CREST_FIELDS.includes(c.field)) return null
+  if (!CREST_CHARGES.includes(c.charge)) return null
+  if (!CREST_INKS.includes(c.ink) || !CREST_INKS.includes(c.ink2)) return null
+  if (!CREST_GROUNDS.includes(c.ground)) return null
+  const chargeInk = c.chargeInk === 'auto' || c.chargeInk == null
+    ? 'auto'
+    : (CREST_INKS.includes(c.chargeInk) ? c.chargeInk : null)
+  if (chargeInk === null) return null
   const scale = Number(c.scale)
   return {
     shape: c.shape, field: c.field, charge: c.charge,
-    ink: c.ink, ink2: c.ink2, ground: c.ground,
+    ink: c.ink, ink2: c.ink2, ground: c.ground, chargeInk,
     scale: Number.isFinite(scale) ? Math.min(1.4, Math.max(0.6, scale)) : 1,
   }
 }
@@ -523,7 +531,8 @@ export async function maybeScanWars() {
   try {
     const wars = await scoreLiveWars()
     const players = await scanWalletPnl()
-    return wars || players
+    const held = await valuePositions()
+    return wars || players || held
   } finally {
     await setMeta('scan_at', now())
     await setMeta('scan_lock', '0')
@@ -548,16 +557,71 @@ export async function scanWalletPnl() {
   const from = BigInt(cursor)
   if (to <= from) return false
 
-  const { totals, scannedTo } = await scanTrades(wallets, from, to)
-  for (const [address, delta] of totals) {
+  const { totals, positions, scannedTo } = await scanTrades(wallets, from, to)
+  for (const [address, row] of totals) {
     await run(
-      `UPDATE wallets SET pnl_wei = ((pnl_wei)::numeric + $1::numeric)::text, trades = trades + 1
-       WHERE lower(address) = $2`,
-      [delta.toString(), address]
+      `UPDATE wallets SET
+         pnl_wei   = ((pnl_wei)::numeric   + $1::numeric)::text,
+         spent_wei = ((spent_wei)::numeric + $2::numeric)::text,
+         recv_wei  = ((recv_wei)::numeric  + $3::numeric)::text,
+         trades    = trades + $4
+       WHERE lower(address) = $5`,
+      [row.net.toString(), row.spent.toString(), row.recv.toString(), row.trades, address]
+    )
+  }
+  /* Remember which curves a wallet has touched: those are the positions worth
+     valuing, and nothing else has to be guessed at. */
+  for (const pos of positions.values()) {
+    await run(
+      `INSERT INTO positions (address, token, curve, seen_at) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (address, token) DO UPDATE SET seen_at = EXCLUDED.seen_at`,
+      [pos.address, pos.token, pos.curve, now()]
     )
   }
   await setMeta('pnl_block', Number(scannedTo))
   return totals.size > 0
+}
+
+/* What every wallet is still sitting on.
+
+   Trades alone report a wallet that bought and held as a pure loss, which is
+   the opposite of the truth. This prices what each position would fetch if it
+   were sold now and stores it beside the realised figure. A bounded number of
+   positions is priced per pass, oldest valuation first, so one slow request
+   never turns into a stampede of chain reads. */
+const VALUE_BATCH = Number(process.env.VALUE_BATCH || 25)
+
+export async function valuePositions() {
+  const stale = await many(
+    `SELECT address, token, curve FROM positions
+     ORDER BY valued_at NULLS FIRST, seen_at DESC
+     LIMIT $1`,
+    [VALUE_BATCH]
+  )
+  if (!stale.length) return false
+
+  const touched = new Set()
+  for (const pos of stale) {
+    let value = 0n
+    try {
+      value = await valuePosition(pos)
+    } catch {
+      continue // a curve that will not answer keeps its previous value
+    }
+    await run('UPDATE positions SET value_wei = $1, valued_at = $2 WHERE address = $3 AND token = $4',
+      [value.toString(), now(), pos.address, pos.token])
+    touched.add(pos.address)
+  }
+
+  for (const address of touched) {
+    const row = await one(
+      "SELECT COALESCE(SUM(value_wei::numeric), 0)::text AS held FROM positions WHERE address = $1",
+      [address]
+    )
+    await run('UPDATE wallets SET hold_wei = $1, hold_at = $2 WHERE address = $3',
+      [row.held, now(), address])
+  }
+  return touched.size > 0
 }
 
 export async function scoreLiveWars() {

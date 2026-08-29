@@ -244,6 +244,21 @@ async function doMigrate() {
     ALTER TABLE clans   ADD COLUMN IF NOT EXISTS motto     TEXT;
     ALTER TABLE wallets ADD COLUMN IF NOT EXISTS pnl_wei   TEXT NOT NULL DEFAULT '0';
     ALTER TABLE wallets ADD COLUMN IF NOT EXISTS trades    INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS spent_wei TEXT NOT NULL DEFAULT '0';
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS recv_wei  TEXT NOT NULL DEFAULT '0';
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS hold_wei  TEXT NOT NULL DEFAULT '0';
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS hold_at   BIGINT;
+
+    CREATE TABLE IF NOT EXISTS positions (
+      address   TEXT NOT NULL,
+      token     TEXT NOT NULL,
+      curve     TEXT NOT NULL,
+      value_wei TEXT NOT NULL DEFAULT '0',
+      seen_at   BIGINT NOT NULL,
+      valued_at BIGINT,
+      PRIMARY KEY (address, token)
+    );
+    CREATE INDEX IF NOT EXISTS positions_addr ON positions(address);
   `)
 
   await run("INSERT INTO meta (key, value) VALUES ('version', '1') ON CONFLICT (key) DO NOTHING")

@@ -714,3 +714,48 @@ button.chainpill:hover { border-color: var(--acc); color: var(--acc); }
   font-family: var(--font-display); font-style: italic; font-size: 14.5px;
   color: var(--acc2); margin-top: 6px;
 }
+
+/* ---- map mode ---- */
+.btn.big {
+  padding: 14px 24px; font-size: 12.5px; letter-spacing: 0.18em;
+  display: inline-flex; align-items: center; gap: 10px;
+}
+.btn.big .icon { width: 18px; height: 18px; }
+
+.mapbar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 66;
+  display: flex; align-items: center; gap: 18px; padding: 10px 16px;
+  background: linear-gradient(rgba(var(--bg-rgb), 0.96), rgba(var(--bg-rgb), 0.86) 70%, transparent);
+  border-bottom: 1px solid var(--line2);
+  animation: heroin 0.3s var(--ease) both;
+}
+.mapexit {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--line); color: var(--ink2); transition: color 0.14s, border-color 0.14s;
+}
+.mapexit:hover { color: var(--acc); border-color: var(--acc); }
+.mapbrand { display: flex; align-items: center; gap: 9px; font-family: var(--font-display); font-style: italic; font-weight: 620; font-size: 19px; }
+.mapbrand .wm-mark { height: 20px; }
+
+.mapnav { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
+.maptab {
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  padding: 8px 12px; border: 1px solid transparent; color: var(--ink2);
+  font-family: var(--font-label); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+.maptab:hover { color: var(--ink); border-color: var(--line2); }
+.maptab.on { color: var(--acc); border-color: var(--acc); background: var(--acc-dim); }
+.maptab b { font-family: var(--font-head); font-size: 11.5px; color: var(--ink3); letter-spacing: 0; }
+.maptab.on b { color: var(--acc2); }
+
+.mapright { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.mapcount { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.mapcount b { font-size: 15px; }
+.mapright .btn { display: inline-flex; align-items: center; gap: 8px; }
+
+@media (max-width: 900px) {
+  .mapbrand span, .maptab span { display: none; }
+  .mapcount { display: none; }
+}

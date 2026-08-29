@@ -17,6 +17,20 @@ export const landFor = (members) => BANNER_TILES + members * TILES_PER_MEMBER
 export const weiToEth = (wei) => {
   try { return Number(BigInt(wei ?? '0')) / 1e18 } catch { return 0 }
 }
+const round6 = (n) => Number(n.toFixed(6))
+
+/* One wallet's money, the same shape wherever it is shown. */
+export function walletMoney(w) {
+  const realised = weiToEth(w.pnl_wei)
+  const hold = weiToEth(w.hold_wei)
+  return {
+    realised: round6(realised),
+    hold: round6(hold),
+    spent: round6(weiToEth(w.spent_wei)),
+    received: round6(weiToEth(w.recv_wei)),
+    pnl: round6(realised + hold),
+  }
+}
 
 const DEG = Math.PI / 180
 export function greatCircle(la1, lo1, la2, lo2) {
@@ -112,11 +126,12 @@ export async function readWorld() {
       many('SELECT * FROM clans'),
       many('SELECT id, lat, lon, d_lat AS "dLat", d_lon AS "dLon", clan_id AS clan FROM tiles WHERE clan_id IS NOT NULL'),
       one('SELECT COUNT(*)::int AS n FROM tiles'),
-      many('SELECT address, handle, pnl_wei, trades FROM wallets'),
+      many('SELECT address, handle, pnl_wei, spent_wei, recv_wei, hold_wei, trades FROM wallets'),
       many('SELECT * FROM wars ORDER BY started_at DESC LIMIT 40'),
       many('SELECT * FROM bounties ORDER BY created_at DESC LIMIT 60'),
       many('SELECT * FROM events ORDER BY id DESC LIMIT 40'),
-      many(`SELECT m.address, m.clan_id, m.role, m.joined_at, w.handle, w.pnl_wei, w.trades
+      many(`SELECT m.address, m.clan_id, m.role, m.joined_at, w.handle,
+                   w.pnl_wei, w.spent_wei, w.recv_wei, w.hold_wei, w.trades
             FROM members m LEFT JOIN wallets w ON w.address = m.address
             ORDER BY m.joined_at`),
       many(`SELECT r.clan_id, r.address, r.created_at, w.handle
@@ -127,22 +142,31 @@ export async function readWorld() {
   const landBy = new Map()
   for (const t of tiles) landBy.set(t.clan, (landBy.get(t.clan) ?? 0) + 1)
 
-  /* Net ETH a wallet has made trading on Pons, read from the chain. It is what
-     ranks players, and a clan's number is simply its members added up. */
+  /* What a wallet has made on Pons, read from the chain.
+
+     `realised` is trades that are closed: taken out minus put in. `hold` is
+     what its open positions would fetch if sold now. Profit is the two added,
+     because a wallet that bought and is still holding has not lost the money
+     it spent. A clan's numbers are its members added up. */
   const rosterBy = new Map()
-  const pnlBy = new Map()
+  const totalsBy = new Map()
   for (const m of members) {
     if (!rosterBy.has(m.clan_id)) rosterBy.set(m.clan_id, [])
-    const pnl = weiToEth(m.pnl_wei)
+    const money = walletMoney(m)
     rosterBy.get(m.clan_id).push({
       address: m.address,
       handle: m.handle ?? m.address,
       role: m.role,
       joinedAt: Number(m.joined_at),
-      pnl,
+      ...money,
       trades: m.trades ?? 0,
     })
-    pnlBy.set(m.clan_id, (pnlBy.get(m.clan_id) ?? 0) + pnl)
+    const acc = totalsBy.get(m.clan_id) ?? { pnl: 0, realised: 0, hold: 0, spent: 0 }
+    acc.pnl += money.pnl
+    acc.realised += money.realised
+    acc.hold += money.hold
+    acc.spent += money.spent
+    totalsBy.set(m.clan_id, acc)
   }
 
   const requestsBy = new Map()
@@ -168,7 +192,17 @@ export async function readWorld() {
       motto: c.motto ?? '',
       crest: typeof c.crest === 'string' ? JSON.parse(c.crest) : c.crest,
       paint: c.paint,
-      pnl: Number((pnlBy.get(c.id) ?? 0).toFixed(6)),
+      ...(() => {
+        const acc = totalsBy.get(c.id) ?? { pnl: 0, realised: 0, hold: 0, spent: 0 }
+        const n = (rosterBy.get(c.id) ?? []).length || 1
+        return {
+          pnl: round6(acc.pnl),
+          realised: round6(acc.realised),
+          hold: round6(acc.hold),
+          spent: round6(acc.spent),
+          pnlPerMember: round6(acc.pnl / n),
+        }
+      })(),
       cap: [c.cap_lat, c.cap_lon],
       trophies: c.trophies,
       xp: c.xp,
@@ -212,7 +246,7 @@ export async function readWorld() {
       address: w.address,
       handle: w.handle,
       clan: clanOf.get(w.address) ?? null,
-      pnl: weiToEth(w.pnl_wei),
+      ...walletMoney(w),
       trades: w.trades ?? 0,
     }))
     .sort((a, b) => b.pnl - a.pnl)
