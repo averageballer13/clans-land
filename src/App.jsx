@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Globe from './globe/Globe.jsx'
 import Crest from './ui/Crest.jsx'
-import { WorldProvider, useWorld } from './lib/store.jsx'
+import { WorldProvider, useWorld, API_BASE } from './lib/store.jsx'
 import { randomCrest } from './lib/crest.js'
 import { discover, walletOptions } from './lib/wallet.js'
 import { CHAIN, LAUNCHPAD, SITE, TOKEN, WORLD_TILES, shortAddr } from './lib/brand.js'
@@ -59,9 +59,11 @@ function HowItWorks({ onClose }) {
   )
 }
 
-const SERVER_HINT = typeof location !== 'undefined'
-  ? `${location.protocol}//${location.hostname}:8787`
-  : 'http://localhost:8787'
+/* On a laptop the fix is to start the server. On a deployed site it means the
+   site went up without a game server behind it, which is a different problem
+   and deserves a different sentence. */
+const IS_LOCAL = typeof location !== 'undefined'
+  && ['localhost', '127.0.0.1', '::1'].includes(location.hostname)
 
 /* ---------------- Wallet sheet ---------------- */
 function WalletIcon({ wallet }) {
@@ -174,8 +176,17 @@ function WalletSheet({ onClose, toast }) {
         {status === 'offline' ? (
           <div className="wnote">
             <b>The game server is not answering.</b>
-            <span>Start it with <code>npm run dev</code>, or open the site on the port the server itself
-              serves ({SERVER_HINT}). Signing in needs it.</span>
+            {IS_LOCAL ? (
+              <span>
+                Start it with <code>npm run dev</code>, or open the site on <code>http://localhost:8787</code>,
+                where the server hosts it directly. Signing in needs it.
+              </span>
+            ) : (
+              <span>
+                This site is up but its game server is not. Nothing can be founded, joined or claimed
+                until it is running{API_BASE ? <> at <code>{API_BASE}</code></> : null}.
+              </span>
+            )}
           </div>
         ) : error ? (
           <p className="empty-copy down" style={{ marginTop: 10 }}>{error}</p>

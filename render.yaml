@@ -1,0 +1,21 @@
+# Render blueprint: one Node service with a disk for the world database.
+services:
+  - type: web
+    name: clans-team
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: node server/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLANS_DB
+        value: /var/data/clans.db
+      # Only needed if the site is served from another domain.
+      - key: CLANS_ORIGINS
+        value: https://www.clans.team,https://clans.team
+    disk:
+      name: world
+      mountPath: /var/data
+      sizeGB: 1

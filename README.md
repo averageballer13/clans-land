@@ -52,6 +52,40 @@ And the chain integration, read-only, against Robinhood Chain mainnet:
 npm run test:chain
 ```
 
+## Putting it online
+
+The site alone is not the game. A static host serves the map and the panels, but
+founding a clan, taking land, joining, wars and coins all need the server, its
+database and its chain reader running somewhere. On a static host every `/api/`
+call returns 404 and the connect sheet says the game server is not answering.
+
+**One host, one port — simplest.** Deploy the whole repo to anything that runs
+Node with a persistent disk (Render, Railway, Fly, a VPS). It builds the site and
+serves it from the same process as the API, so there is no CORS and no second
+address to keep in step. `render.yaml` and the `Dockerfile` are ready:
+
+```bash
+docker build -t clans .
+docker run -p 8787:8787 -v clans-world:/data clans
+```
+
+Point `clans.team` at that service and you are done.
+
+**Site here, server there.** Keep the site on its current host and run only the
+API elsewhere. Two settings have to match:
+
+| Where | Setting | Value |
+| --- | --- | --- |
+| the site's build | `VITE_API_URL` | `https://api.clans.team` |
+| the server | `CLANS_ORIGINS` | `https://www.clans.team,https://clans.team` |
+
+`CLANS_ORIGINS` is a strict allow-list: an origin that is not in it gets no CORS
+headers at all. `GET /api/health` answers `{ ok: true, chain: 4663 }` and is what
+a host should watch.
+
+The world lives in one SQLite file (`CLANS_DB`, `server/data/clans.db` by
+default). Put it on a mounted disk or the map is wiped on every redeploy.
+
 ## How the shared world works
 
 | Piece | What it does |

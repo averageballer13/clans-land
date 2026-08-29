@@ -14,6 +14,29 @@ const PORT = Number(process.env.PORT || 8787)
 const app = express()
 app.use(express.json({ limit: '64kb' }))
 
+/* The site and the API can live on different hosts — clans.team on a static
+   host, the game server anywhere that runs Node. Set CLANS_ORIGINS to the
+   site's origins, comma separated, to let it through. */
+const ORIGINS = (process.env.CLANS_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''))
+  .filter(Boolean)
+
+app.use((req, res, next) => {
+  const origin = req.get('origin')
+  if (origin && (ORIGINS.includes('*') || ORIGINS.includes(origin))) {
+    res.set('Access-Control-Allow-Origin', origin)
+    res.set('Vary', 'Origin')
+    res.set('Access-Control-Allow-Headers', 'authorization, content-type')
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    res.set('Access-Control-Max-Age', '86400')
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(origin ? 204 : 405)
+  next()
+})
+
+app.get('/api/health', (_req, res) => res.json({ ok: true, chain: CHAIN_ID }))
+
 const total = ensureGrid()
 console.log(`[clans] world grid ready: ${total} tiles`)
 
