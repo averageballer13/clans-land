@@ -49,6 +49,36 @@ check('the map is the full grid', world.json?.stats?.totalTiles === 1200, `got $
 const world2 = await get('/api/world')
 check('two reads agree', JSON.stringify(world.json.clans) === JSON.stringify(world2.json.clans))
 
+/* The Vercel rewrite hands the matched segments over as `__p`. Drive the real
+   entry point over real requests and prove it rebuilds the path, including the
+   nested ones that 404'd in production. */
+{
+  const { createServer } = await import('node:http')
+  const { default: handler } = await import('../api/index.js')
+  const vercel = createServer(handler)
+  await new Promise((r) => vercel.listen(0, r))
+  const vbase = `http://127.0.0.1:${vercel.address().port}`
+
+  const asVercel = async (segments, query = '', method = 'GET') => {
+    const res = await fetch(`${vbase}/api?__p=${segments}${query}`, { method })
+    return { status: res.status, json: await res.json().catch(() => null) }
+  }
+
+  const single = await asVercel('world')
+  check('a single segment reaches the world', single.status === 200 && single.json?.stats?.totalTiles === 1200)
+
+  const nested = await asVercel('auth/nonce', '&address=0x3690589E41C7705AC65BD456202fe936B55420A0')
+  check('a nested path reaches the sign-in nonce', nested.status === 200 && typeof nested.json?.nonce === 'string',
+    nested.json?.error ?? `HTTP ${nested.status}`)
+
+  // A three level route that exists only for POST: reaching it means the path
+  // survived, and 401 means it got as far as asking who is calling.
+  const deep = await asVercel('clans/embr/join', '', 'POST')
+  check('a three level path reaches its route', deep.status === 401, `HTTP ${deep.status} ${deep.json?.error ?? ''}`)
+
+  vercel.close()
+}
+
 server.close()
 console.log(`\n${failures === 0 ? 'all checks passed' : failures + ' check(s) failed'}\n`)
 process.exit(failures === 0 ? 0 : 1)
