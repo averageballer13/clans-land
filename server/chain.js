@@ -171,4 +171,46 @@ export async function valuePosition({ address, token, curve }) {
   return out < real ? out : real
 }
 
+/* The block the Pons factory was deployed in.
+
+   Nothing a wallet did before it can be a Pons trade, so a history walk has a
+   floor. Asking for every launch since genesis is refused by the public node,
+   so this binary-searches on whether the contract had code yet: about
+   twenty-six calls for the whole chain, and exact.
+   ------------------------------------------------------------------ */
+/* How far back a wallet's trading is read when the chain's start cannot be
+   pinned down. Four million blocks is a few days at this chain's block time. */
+const HISTORY_WINDOW = BigInt(process.env.HISTORY_WINDOW_BLOCKS || 4_000_000)
+
+let floorBlock = null
+export async function ponsFirstBlock() {
+  if (floorBlock !== null) return floorBlock
+
+  const hasCode = async (block) => {
+    const code = await client.getCode({ address: PONS.factory, blockNumber: block })
+    return Boolean(code) && code !== '0x'
+  }
+
+  try {
+    const tip = await head()
+    if (!(await hasCode(tip))) { floorBlock = tip; return floorBlock }
+
+    let lo = 0n, hi = tip
+    while (lo < hi) {
+      const mid = (lo + hi) / 2n
+      if (await hasCode(mid)) hi = mid
+      else lo = mid + 1n
+    }
+    floorBlock = lo
+  } catch {
+    /* The public node only keeps recent state, so the exact deployment block
+       cannot be found from here. Never fall back to genesis: that sets a walk
+       of tens of millions of blocks that never finishes. A bounded window is
+       the safer answer, and an archive RPC widens it. */
+    try { floorBlock = (await head()) - HISTORY_WINDOW } catch { floorBlock = 0n }
+    if (floorBlock < 0n) floorBlock = 0n
+  }
+  return floorBlock
+}
+
 export const toEth = (wei) => Number(formatEther(wei))

@@ -248,6 +248,9 @@ async function doMigrate() {
     ALTER TABLE wallets ADD COLUMN IF NOT EXISTS recv_wei  TEXT NOT NULL DEFAULT '0';
     ALTER TABLE wallets ADD COLUMN IF NOT EXISTS hold_wei  TEXT NOT NULL DEFAULT '0';
     ALTER TABLE wallets ADD COLUMN IF NOT EXISTS hold_at   BIGINT;
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS back_block BIGINT;
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS back_done  BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE clans   ADD COLUMN IF NOT EXISTS image      TEXT;
 
     CREATE TABLE IF NOT EXISTS positions (
       address   TEXT NOT NULL,

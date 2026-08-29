@@ -18,7 +18,9 @@ import {
   readWorld, grantTiles, reconcileLand, settleDueWars, newId, tileAt,
   landFor, addXp, PAINTS, CLAN_MAX,
 } from './world.js'
-import { verifyLaunch, scanTrades, valuePosition, head, toEth, CHAIN_ID } from './chain.js'
+import {
+  verifyLaunch, scanTrades, valuePosition, ponsFirstBlock, head, toEth, CHAIN_ID,
+} from './chain.js'
 import {
   CREST_SHAPES, CREST_FIELDS, CREST_CHARGES, CREST_INKS, CREST_GROUNDS,
 } from '../src/ui/crestArt.js'
@@ -167,8 +169,12 @@ app.post('/api/auth/verify', async (req, res) => {
   const existing = await one('SELECT * FROM wallets WHERE address = $1', [address])
   if (existing) await run('UPDATE wallets SET seen_at = $1 WHERE address = $2', [now(), address])
   else {
-    await run('INSERT INTO wallets (address, handle, created_at, seen_at) VALUES ($1, $2, $3, $4)',
-      [address, handleFor(address), now(), now()])
+    let at = null
+    try { at = Number(await head()) } catch { /* filled in by the first scan */ }
+    await run(
+      'INSERT INTO wallets (address, handle, created_at, seen_at, back_block) VALUES ($1, $2, $3, $4, $5)',
+      [address, handleFor(address), now(), now(), at]
+    )
     await broadcast()
   }
 
@@ -346,6 +352,35 @@ app.post('/api/clans/:id/decline', auth, async (req, res) => {
   const gone = await run('DELETE FROM requests WHERE clan_id = $1 AND address = $2',
     [me.clan_id, String(req.body?.address || '')])
   if (!gone) return fail(res, 404, 'no such request')
+  await broadcast()
+  res.json({ ok: true })
+})
+
+/* The clan picture.
+
+   Small enough to live in the row beside everything else: the browser scales
+   the file down before it is sent, and anything bigger than this is refused
+   rather than quietly stored. A plain https link is accepted too. */
+const MAX_IMAGE_BYTES = 96 * 1024
+
+function validateImage(raw) {
+  const v = String(raw ?? '').trim()
+  if (!v) return ''
+  if (/^https:\/\/[^\s"'<>]{4,480}$/.test(v)) return v
+  const m = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(v)
+  if (!m) return null
+  const bytes = Math.floor((m[2].length * 3) / 4)
+  if (bytes > MAX_IMAGE_BYTES) return null
+  return v
+}
+
+app.post('/api/clans/:id/image', auth, async (req, res) => {
+  const me = await one('SELECT * FROM members WHERE address = $1', [req.address])
+  if (!me || me.clan_id !== req.params.id || !['leader', 'coleader'].includes(me.role))
+    return fail(res, 403, 'leader or co leader only')
+  const image = validateImage(req.body?.image)
+  if (image === null) return fail(res, 400, 'that image is not a png, jpeg or webp under 96 KB')
+  await run('UPDATE clans SET image = $1 WHERE id = $2', [image || null, me.clan_id])
   await broadcast()
   res.json({ ok: true })
 })
@@ -531,8 +566,9 @@ export async function maybeScanWars() {
   try {
     const wars = await scoreLiveWars()
     const players = await scanWalletPnl()
+    const history = await backfillWallets()
     const held = await valuePositions()
-    return wars || players || held
+    return wars || players || history || held
   } finally {
     await setMeta('scan_at', now())
     await setMeta('scan_lock', '0')
@@ -558,6 +594,12 @@ export async function scanWalletPnl() {
   if (to <= from) return false
 
   const { totals, positions, scannedTo } = await scanTrades(wallets, from, to)
+  await applyTrades(totals, positions)
+  await setMeta('pnl_block', Number(scannedTo))
+  return totals.size > 0
+}
+
+async function applyTrades(totals, positions) {
   for (const [address, row] of totals) {
     await run(
       `UPDATE wallets SET
@@ -578,8 +620,60 @@ export async function scanWalletPnl() {
       [pos.address, pos.token, pos.curve, now()]
     )
   }
-  await setMeta('pnl_block', Number(scannedTo))
-  return totals.size > 0
+}
+
+/* A wallet's history.
+
+   The forward scan only ever sees trades made after someone signs in, so a
+   wallet that has been trading on Pons for weeks would sit at zero until it
+   traded again. This walks backwards from the block it signed in at, a slice
+   at a time, until it reaches the first block Pons ever launched a token in.
+   Each wallet carries its own cursor, so the walk survives restarts and
+   whichever instance picks it up next. */
+const BACK_SLICE = BigInt(process.env.BACKFILL_SLICE || 48000)
+const BACK_WALLETS = Number(process.env.BACKFILL_WALLETS || 2)
+
+export async function backfillWallets() {
+  try {
+    return await walkHistory()
+  } catch (e) {
+    // A flaky node must never turn a page load into a 500.
+    console.error('[clans] history walk failed:', e.message)
+    return false
+  }
+}
+
+async function walkHistory() {
+  const pending = await many(
+    'SELECT address, back_block FROM wallets WHERE back_done = false ORDER BY seen_at DESC LIMIT $1',
+    [BACK_WALLETS]
+  )
+  if (!pending.length) return false
+
+  const floor = await ponsFirstBlock()
+  let changed = false
+
+  for (const w of pending) {
+    if (w.back_block == null) {
+      try {
+        await run('UPDATE wallets SET back_block = $1 WHERE address = $2', [Number(await head()), w.address])
+      } catch { /* try again next pass */ }
+      continue
+    }
+    const upto = BigInt(w.back_block)
+    if (upto <= floor) {
+      await run('UPDATE wallets SET back_done = true WHERE address = $1', [w.address])
+      continue
+    }
+    const from = upto - BACK_SLICE > floor ? upto - BACK_SLICE : floor
+
+    const { totals, positions } = await scanTrades([w.address], from, upto)
+    await applyTrades(totals, positions)
+    await run('UPDATE wallets SET back_block = $1, back_done = $2 WHERE address = $3',
+      [Number(from), from <= floor, w.address])
+    if (totals.size) changed = true
+  }
+  return changed
 }
 
 /* What every wallet is still sitting on.

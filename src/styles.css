@@ -41,6 +41,11 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; border-radius: 0 !important; }
+
+/* `hidden` has to win. The browser's own rule is only `display: none`, so any
+   class here that sets a display would quietly override it and leave the
+   element on screen. */
+[hidden] { display: none !important; }
 html, body, #root { height: 100%; overflow: hidden; }
 body {
   background: var(--bg);
@@ -759,3 +764,15 @@ button.chainpill:hover { border-color: var(--acc); color: var(--acc); }
   .mapbrand span, .maptab span { display: none; }
   .mapcount { display: none; }
 }
+
+/* ---- a clan's own picture ---- */
+.clanface { position: relative; flex: none; }
+.clanface img { width: 78px; height: 78px; object-fit: cover; display: block; border: 1px solid var(--line); }
+.facepick {
+  position: absolute; left: 0; right: 0; bottom: 0; text-align: center; cursor: pointer;
+  font-family: var(--font-label); font-size: 9px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink); background: rgba(8, 9, 11, 0.82);
+  padding: 3px 0; opacity: 0; transition: opacity 0.15s;
+}
+.clanface:hover .facepick { opacity: 1; }
+.clanpic { width: 40px; height: 40px; object-fit: cover; display: block; flex: none; border: 1px solid var(--line2); }

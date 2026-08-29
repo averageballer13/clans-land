@@ -56,7 +56,7 @@ const FALLBACK = {
   signIn: noop, signOut: noop, refresh: noop, toast: () => {},
   clanBy: () => null, myClan: null, myRole: null,
   foundClan: noop, joinClan: noop, acceptMember: noop, declineMember: noop,
-  setRole: noop, setMotto: noop, leaveClan: noop, registerCoin: noop, declareWar: noop,
+  setRole: noop, setMotto: noop, setImage: noop, leaveClan: noop, registerCoin: noop, declareWar: noop,
   postBounty: noop, claimBounty: noop, releaseBounty: noop,
 }
 
@@ -175,6 +175,7 @@ export function WorldProvider({ children, onToast }) {
     declineMember: (id, address) => act(`/api/clans/${id}/decline`, { address }),
     setRole: (id, address, role) => act(`/api/clans/${id}/role`, { address, role }),
     setMotto: (id, motto) => act(`/api/clans/${id}/motto`, { motto }),
+    setImage: (id, image) => act(`/api/clans/${id}/image`, { image }),
     leaveClan: (id) => act(`/api/clans/${id}/leave`),
     registerCoin: (id, txHash) => act(`/api/clans/${id}/coin`, { txHash }),
     declareWar: (target, hours) => act('/api/wars', { target, hours }),

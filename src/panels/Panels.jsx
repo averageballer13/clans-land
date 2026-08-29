@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import Crest from '../ui/Crest.jsx'
 import { useWorld } from '../lib/store.jsx'
 import { CHAIN, LAUNCHPAD, TOKEN, DEV_WALLET, shortAddr, WORLD_TILES, CLAN_MAX } from '../lib/brand.js'
-import { CREST_SHAPES, CREST_FIELDS, CREST_CHARGES, CREST_INKS, CREST_GROUNDS, randomCrest } from '../lib/crest.js'
+import {
+  CREST_SHAPES, CREST_FIELDS, CREST_CHARGES, CREST_INKS, CREST_GROUNDS,
+  randomCrest, fileToClanImage,
+} from '../lib/crest.js'
 import { launchClanCoin, launchPreflight } from '../lib/launch.js'
 
 const eth = (n) => `${n > 0 ? '+' : ''}${Number(n).toFixed(3)} ${CHAIN.gas}`
@@ -135,7 +138,9 @@ export function Directory({ go, toast }) {
       )}
       {list.map((c) => (
         <div className="dirrow" key={c.id} onClick={() => go('clan', c.id)}>
-          <Crest tag={c.tag} spec={c.crest} size={40} />
+          {c.image
+            ? <img className="clanpic" src={c.image} alt="" />
+            : <Crest tag={c.tag} spec={c.crest} size={40} />}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="lb-name">
               <span className="n">{c.name} <span className="faint">[{c.tag}]</span><span className="lvlchip">LVL {c.lvl}</span></span>
@@ -207,7 +212,10 @@ export function Leaderboard({ go }) {
             </span>
             <div className="lb-name">
               <div className="n">{p.handle}</div>
-              <div className="t">{p.clan ? `[${p.clan.toUpperCase()}]` : 'no clan'} · {p.trades} trades · {shortAddr(p.address)}</div>
+              <div className="t">
+                {p.clan ? `[${p.clan.toUpperCase()}]` : 'no clan'} · {p.trades} trades ·
+                holding {eth(p.hold)} · realised {eth(p.realised)}
+              </div>
             </div>
             <div className={`lb-val ${cls(p.pnl)}`}>{eth(p.pnl)}</div>
           </div>
@@ -803,7 +811,10 @@ function LaunchCoin({ clan, toast }) {
 /* ================= Clan detail ================= */
 export function ClanDetail({ id, toast, focus, go }) {
   const world = useWorld()
-  const { clanBy, me, myRole, signedIn, joinClan, leaveClan, wars, acceptMember, declineMember, setRole } = world
+  const {
+    clanBy, me, myRole, signedIn, joinClan, leaveClan, wars,
+    acceptMember, declineMember, setRole, setImage,
+  } = world
   const c = clanBy(id)
   const [tab, setTab] = useState('roster')
   const [busy, run] = useAction(toast)
@@ -816,7 +827,22 @@ export function ClanDetail({ id, toast, focus, go }) {
   return (
     <>
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', margin: '4px 0 14px' }}>
-        <Crest tag={c.tag} spec={c.crest} size={78} />
+        <div className="clanface">
+          {c.image ? <img src={c.image} alt="" /> : <Crest tag={c.tag} spec={c.crest} size={78} />}
+          {mine && ['leader', 'coleader'].includes(myRole) && (
+            <label className="facepick">
+              {c.image ? 'Change' : 'Add photo'}
+              <input
+                type="file" accept="image/*" hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (file) run(async () => setImage(c.id, await fileToClanImage(file)), 'Photo set')
+                }}
+              />
+            </label>
+          )}
+        </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="num" style={{ fontSize: 19, fontWeight: 600 }}>{c.name}<span className="lvlchip big">LVL {c.lvl}</span></div>
           <span className="lbl">[{c.tag}] · {c.members} of {CLAN_MAX} · {ENTRY_LABEL[c.entry]} · {c.region}</span>
@@ -831,6 +857,11 @@ export function ClanDetail({ id, toast, focus, go }) {
         <div className="stat"><span className="lbl">Land</span><span className="v">{c.land}</span></div>
         <div className="stat"><span className="lbl">Record</span><span className="v">{c.wins}W {c.losses}L</span></div>
         <div className="stat"><span className="lbl">Profit</span><span className={`v ${cls(c.pnl)}`}>{eth(c.pnl)}</span></div>
+      </div>
+      <div className="statrow" style={{ paddingTop: 0 }}>
+        <div className="stat"><span className="lbl">Holding</span><span className="v">{eth(c.hold)}</span></div>
+        <div className="stat"><span className="lbl">Realised</span><span className={`v ${cls(c.realised)}`}>{eth(c.realised)}</span></div>
+        <div className="stat"><span className="lbl">Per member</span><span className={`v ${cls(c.pnlPerMember)}`}>{eth(c.pnlPerMember)}</span></div>
       </div>
 
       {c.coin ? (

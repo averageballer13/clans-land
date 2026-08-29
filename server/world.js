@@ -190,6 +190,7 @@ export async function readWorld() {
       region: c.region,
       lang: c.lang,
       motto: c.motto ?? '',
+      image: c.image ?? null,
       crest: typeof c.crest === 'string' ? JSON.parse(c.crest) : c.crest,
       paint: c.paint,
       ...(() => {

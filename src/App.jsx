@@ -346,7 +346,7 @@ function Shell({ toast, toasts }) {
         pickMode={pickMode}
         marker={capital}
         focus={focus}
-        zoom={mapMode ? 1.85 : 3.05}
+        zoom={mapMode ? 2.72 : 3.05}
         paused={how}
       />
 
