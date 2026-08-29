@@ -1,4 +1,4 @@
-# Clans.land
+# Clans.team
 
 **The World of SocialFi on Robinhood Chain.** Social trading as a competitive game:
 wallets form clans, clans take land on one shared globe, clan coins launched on
@@ -152,7 +152,7 @@ Everything in `public/brand/` is the real mark, fetched from the vendor:
 - `pons.png` — the Pons launchpad mark
 - `wallet/` — MetaMask, Rabby, Coinbase Wallet, WalletConnect
 
-Clans.land is not affiliated with Robinhood Markets, Robinhood Chain, Pons, or any
+Clans.team is not affiliated with Robinhood Markets, Robinhood Chain, Pons, or any
 wallet whose mark appears here. Marks identify their services and belong to their
 owners.
 

@@ -29,13 +29,13 @@ export const LAUNCHPAD = {
 
 export const SITE = {
   name: 'Clans',
-  tld: '.land',
-  domain: 'clans.land',
+  tld: '.team',
+  domain: 'clans.team',
 }
 
 export const TOKEN = {
   symbol: 'CLANS',
-  name: 'Clans.land',
+  name: 'Clans.team',
   // Not deployed yet — the launch happens on Pons.
   address: null,
   url: LAUNCHPAD.site,

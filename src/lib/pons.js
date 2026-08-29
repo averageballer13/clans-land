@@ -130,7 +130,7 @@ export function clanTokenParams({ clan, creator, logo = '', description = '', li
     name: clan.name,
     symbol: clan.tag,
     logo,
-    description: description || `${clan.name} [${clan.tag}] — a clan on clans.land, the world of SocialFi on Robinhood Chain.`,
+    description: description || `${clan.name} [${clan.tag}] — a clan on clans.team, the world of SocialFi on Robinhood Chain.`,
     socials: {
       twitter: links.twitter || '',
       telegram: links.telegram || '',

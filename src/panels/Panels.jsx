@@ -360,7 +360,7 @@ export function Bounties({ toast }) {
               Post the bounty
             </button>
             <p className="empty-copy" style={{ margin: 0 }}>
-              Payment is wallet to wallet in {CHAIN.gas}. Clans.land is not an escrow and never holds it.
+              Payment is wallet to wallet in {CHAIN.gas}. Clans.team is not an escrow and never holds it.
             </p>
           </div>
         </div>
@@ -449,7 +449,7 @@ export function Token() {
         <h3>Clan coins</h3>
         <p>
           Every clan Leader can register the coin they deployed on {LAUNCHPAD.name}. Each trade accrues
-          creator fees to that coin's own on chain vault. Clans.land never holds or distributes any of
+          creator fees to that coin's own on chain vault. Clans.team never holds or distributes any of
           it: the vault belongs to the coin's creator wallet.
         </p>
       </div>
@@ -699,10 +699,10 @@ function LaunchCoin({ clan, toast }) {
           <label className="field"><span className="lbl">Description</span>
             <textarea value={form.description} maxLength={280}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder={`${clan.name} — a clan on clans.land.`} />
+              placeholder={`${clan.name} — a clan on clans.team.`} />
           </label>
           <label className="field"><span className="lbl">Website</span>
-            <input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} placeholder="https://clans.land" />
+            <input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} placeholder="https://clans.team" />
           </label>
           <label className="field"><span className="lbl">X / Twitter</span>
             <input value={form.twitter} onChange={(e) => setForm({ ...form, twitter: e.target.value })} placeholder="https://x.com/…" />
@@ -892,7 +892,7 @@ export function Rules() {
     <div className="doc">
       <h3>SocialFi</h3>
       <p>
-        Clans.land is the world of SocialFi on <b>{CHAIN.name}</b>: social trading as a competitive
+        Clans.team is the world of SocialFi on <b>{CHAIN.name}</b>: social trading as a competitive
         game, run by the community. Nobody wins it alone. Wallets form clans, clans take land, clan
         coins launched on <b>{LAUNCHPAD.name}</b> earn the creator rewards, wars settle the rest.
       </p>
@@ -913,7 +913,7 @@ export function Rules() {
       <p>
         Creator rewards come from the clan coin. When the Leader deploys it on <b>{LAUNCHPAD.name}</b>,
         every trade accrues creator fees to the coin's own on chain vault, paid by {LAUNCHPAD.name}
-        itself. Clans.land never holds or distributes any of it: the vault belongs to the coin's
+        itself. Clans.team never holds or distributes any of it: the vault belongs to the coin's
         creator wallet, and how a clan shares it is the clan's business.
       </p>
       <h3>Wars</h3>
@@ -931,7 +931,7 @@ export function Rules() {
       <h3>Bounties</h3>
       <p>
         The marketplace. Anyone posts a bounty and anyone else can claim it. Payment is wallet to
-        wallet in {CHAIN.gas}. Clans.land is not an escrow and never touches the money.
+        wallet in {CHAIN.gas}. Clans.team is not an escrow and never touches the money.
       </p>
       <h3>Signing in</h3>
       <p>
@@ -954,16 +954,16 @@ export function Terms() {
         interacting with this site means you accept these terms in full. If you do not accept them,
         you may watch, but do not connect or interact.
       </p>
-      <h3>2. What Clans.land is</h3>
+      <h3>2. What Clans.team is</h3>
       <p>
-        Clans.land is an interface and a scoreboard. It organises wallets into clans around public{' '}
+        Clans.team is an interface and a scoreboard. It organises wallets into clans around public{' '}
         {CHAIN.name} and {LAUNCHPAD.name} activity: land, wars, trophies, levels and bounties. It is a
         game layer. It is not an exchange, a broker, a wallet, an investment platform, or an issuer of
         anything.
       </p>
       <h3>3. Not affiliated</h3>
       <p>
-        Clans.land is not affiliated with, endorsed by, or operated by Robinhood Markets, {CHAIN.name},{' '}
+        Clans.team is not affiliated with, endorsed by, or operated by Robinhood Markets, {CHAIN.name},{' '}
         {LAUNCHPAD.name}, MetaMask, Rabby, Coinbase, WalletConnect, or any other project whose name or
         mark appears here. Names and marks identify their services and belong to their owners.
       </p>
@@ -975,7 +975,7 @@ export function Terms() {
       </p>
       <h3>5. Wallets and self custody</h3>
       <p>
-        Your wallet stays yours at all times. Clans.land never takes custody of funds, never holds
+        Your wallet stays yours at all times. Clans.team never takes custody of funds, never holds
         keys, and never moves anything on your behalf. Signing in signs a plain text message, not a
         transaction.
       </p>
@@ -988,7 +988,7 @@ export function Terms() {
       <h3>7. Bounties and rewards</h3>
       <p>
         Bounties are agreements between the people who post and claim them. Payment happens wallet to
-        wallet and Clans.land is not an escrow, guarantor or arbitrator. Creator rewards accrue to a
+        wallet and Clans.team is not an escrow, guarantor or arbitrator. Creator rewards accrue to a
         coin's own vault on {LAUNCHPAD.name}; we neither hold nor route them.
       </p>
       <h3>8. Conduct</h3>

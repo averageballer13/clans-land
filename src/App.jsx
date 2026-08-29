@@ -82,7 +82,7 @@ function WalletSheet({ onClose, toast }) {
   }, [])
 
   const gates = [
-    `I understand Clans.land is a game layer over public ${CHAIN.name} activity and holds none of my funds.`,
+    `I understand Clans.team is a game layer over public ${CHAIN.name} activity and holds none of my funds.`,
     'I accept the Terms of Use and understand nothing here is financial advice.',
   ]
   const ready = ok[0] && ok[1]

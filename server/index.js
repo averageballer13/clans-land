@@ -54,7 +54,7 @@ function handleFor(address) {
 }
 
 const signInMessage = (address, nonce) =>
-  `clans.land wants you to sign in with your wallet.\n\n` +
+  `clans.team wants you to sign in with your wallet.\n\n` +
   `Address: ${address}\n` +
   `Nonce: ${nonce}\n\n` +
   `Signing costs nothing and grants no access to your funds.`
