@@ -45,6 +45,23 @@ const crest = {
 }
 const stamp = Date.now().toString(36).toUpperCase().slice(-3)
 
+/* The world may already hold clans, so never hard-code a capital: find
+   ground nobody has taken and plant there. */
+function freeSpot(world, skip = 0) {
+  const held = (lat, lon) => world.tiles.some(
+    (t) => Math.abs(t.lat - lat) <= t.dLat / 2 && Math.abs(((lon - t.lon + 540) % 360) - 180) <= t.dLon / 2
+  )
+  let seen = 0
+  for (let lat = 60; lat > -60; lat -= 3) {
+    for (let lon = -175; lon < 175; lon += 5) {
+      if (held(lat, lon)) continue
+      if (seen++ < skip) continue
+      return [lat, lon]
+    }
+  }
+  throw new Error('the world is full')
+}
+
 console.log(`\n--- clans.land api check against ${API} ---\n`)
 
 const alice = await signIn()
@@ -67,7 +84,7 @@ check('three wallets signed in with real signatures', !!alice.token && !!bob.tok
 const before = (await call('/api/world')).json
 
 // Alice founds a clan on open ground.
-const capA = [48.86, 2.35]
+const capA = freeSpot(before)
 const A = await call('/api/clans', {
   method: 'POST', token: alice.token,
   body: { name: 'Ember Court', tag: 'EM' + stamp, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: capA },
@@ -82,7 +99,7 @@ check('a new clan starts on 9 tiles (6 banner + 3 for the leader)', A.json.clan?
 {
   const dup = await call('/api/clans', {
     method: 'POST', token: bob.token,
-    body: { name: 'Copycat', tag: tagA, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: [10, 10] },
+    body: { name: 'Copycat', tag: tagA, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: freeSpot(before, 120) },
   })
   check('a taken tag is refused', dup.status === 409, dup.json.error)
 }
@@ -96,10 +113,12 @@ check('a new clan starts on 9 tiles (6 banner + 3 for the leader)', A.json.clan?
   check('a capital on claimed ground is refused', overlap.status === 409, overlap.json.error)
 }
 
-// Bob founds his own, far away.
+// Bob founds his own, on different open ground.
+const afterA = (await call('/api/world')).json
+const capB = freeSpot(afterA, 60)
 const B = await call('/api/clans', {
   method: 'POST', token: bob.token,
-  body: { name: 'Nightdesk', tag: 'ND' + stamp, entry: 'open', region: 'Singapore', lang: 'English', crest, cap: [1.35, 103.82] },
+  body: { name: 'Nightdesk', tag: 'ND' + stamp, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: capB },
 })
 check('bob founded a second clan', B.status === 200, B.json.error || B.json.clan?.tag)
 const idB = B.json.clan?.id
@@ -121,7 +140,7 @@ check('the world is identical for a signed-in and an anonymous reader',
   JSON.stringify(worldAnon.clans) === JSON.stringify(worldAlice.clans))
 
 const clanA = worldAnon.clans.find((c) => c.id === idA)
-check('the clan grew to 12 tiles after the second member', clanA?.land === 12, `got ${clanA?.land}`)
+check('the clan grew from 9 to 12 tiles after the second member', clanA?.land === 12, `got ${clanA?.land}`)
 check('the roster carries a leader and a member', clanA?.roster.length === 2 && clanA.roster[0].role === 'leader')
 
 // Land is exclusive: no tile is held by two clans, and totals line up.
@@ -171,7 +190,7 @@ check('the world grew since the start', worldAnon.stats.clans > before.stats.cla
 {
   const anon = await call('/api/clans', {
     method: 'POST',
-    body: { name: 'Ghosts', tag: 'GH' + stamp, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: [0, 0] },
+    body: { name: 'Ghosts', tag: 'GH' + stamp, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: capA },
   })
   check('an unsigned request cannot change the world', anon.status === 401)
 }
