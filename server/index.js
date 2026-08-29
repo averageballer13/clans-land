@@ -131,7 +131,7 @@ app.get('/api/me', auth, (req, res) => {
    Clans
    ------------------------------------------------------------------ */
 const TAG_RE = /^[A-Z0-9]{3,6}$/
-const ENTRIES = new Set(['open', 'request', 'invite'])
+const ENTRIES = new Set(['public', 'private'])
 
 function validateCrest(c) {
   const hex = /^#[0-9a-fA-F]{6}$/
@@ -207,10 +207,11 @@ app.post('/api/clans/:id/join', auth, (req, res) => {
   const count = db.prepare('SELECT COUNT(*) AS n FROM members WHERE clan_id = ?').get(clan.id).n
   if (count >= CLAN_MAX) return res.status(409).json({ error: 'clan is full' })
 
-  if (clan.entry === 'invite') return res.status(403).json({ error: 'invite only' })
-  if (clan.entry === 'request') {
+  /* A private clan collects a request instead; its leader decides. */
+  if (clan.entry !== 'public') {
     db.prepare('INSERT OR REPLACE INTO requests (clan_id, address, created_at) VALUES (?, ?, ?)')
       .run(clan.id, req.address, now())
+    logEvent('request', clan.tag, `a wallet asked to join ${clan.tag}`)
     broadcast()
     return res.json({ requested: true })
   }
@@ -248,6 +249,41 @@ app.post('/api/clans/:id/accept', auth, (req, res) => {
   addXp(me.clan_id, 10)
   const clan = db.prepare('SELECT tag FROM clans WHERE id = ?').get(me.clan_id)
   logEvent('join', clan.tag, `${clan.tag} accepted a new wallet`)
+  broadcast()
+  res.json({ ok: true })
+})
+
+app.post('/api/clans/:id/decline', auth, (req, res) => {
+  const me = db.prepare('SELECT * FROM members WHERE address = ?').get(req.address)
+  if (!me || me.clan_id !== req.params.id || !['leader', 'coleader', 'elder'].includes(me.role))
+    return res.status(403).json({ error: 'elders and up only' })
+  const target = String(req.body?.address || '')
+  const gone = db.prepare('DELETE FROM requests WHERE clan_id = ? AND address = ?').run(me.clan_id, target)
+  if (!gone.changes) return res.status(404).json({ error: 'no such request' })
+  broadcast()
+  res.json({ ok: true })
+})
+
+/* Roles. A leader hands out ranks; only a leader can pass the banner on. */
+const RANKS = new Set(['coleader', 'elder', 'member'])
+app.post('/api/clans/:id/role', auth, (req, res) => {
+  const me = db.prepare('SELECT * FROM members WHERE address = ?').get(req.address)
+  if (!me || me.clan_id !== req.params.id || me.role !== 'leader')
+    return res.status(403).json({ error: 'leader only' })
+  const target = String(req.body?.address || '')
+  const role = String(req.body?.role || '')
+  if (target === req.address) return res.status(400).json({ error: 'you already lead this clan' })
+  const them = db.prepare('SELECT * FROM members WHERE address = ? AND clan_id = ?').get(target, me.clan_id)
+  if (!them) return res.status(404).json({ error: 'not in your clan' })
+
+  if (role === 'leader') {
+    db.prepare('UPDATE members SET role = ? WHERE address = ?').run('leader', target)
+    db.prepare('UPDATE members SET role = ? WHERE address = ?').run('coleader', req.address)
+  } else if (RANKS.has(role)) {
+    db.prepare('UPDATE members SET role = ? WHERE address = ?').run(role, target)
+  } else {
+    return res.status(400).json({ error: 'bad role' })
+  }
   broadcast()
   res.json({ ok: true })
 })

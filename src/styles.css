@@ -566,3 +566,62 @@ a.gstat.tokenlink:hover .lbl { color: var(--ink); }
 /* ---- the connected-wallet pill doubles as a sign-out button ---- */
 button.chainpill { cursor: pointer; font-family: var(--font-head); text-transform: none; letter-spacing: 0.02em; }
 button.chainpill:hover { border-color: var(--acc); color: var(--acc); }
+
+/* ---- connect sheet ---- */
+.wsheet { width: min(430px, calc(100vw - 32px)); padding: 22px 22px 20px; }
+.whead { position: relative; margin-bottom: 14px; }
+.whead h2 { margin: 4px 0 0; }
+.wclose {
+  position: absolute; top: -2px; right: -4px; width: 28px; height: 28px;
+  display: grid; place-items: center; color: var(--ink3);
+}
+.wclose:hover { color: var(--ink); }
+
+.wsearch {
+  display: flex; align-items: center; gap: 9px; margin: 14px 0 6px;
+  padding: 9px 11px; border: 1px solid var(--line2); color: var(--ink3);
+}
+.wsearch input { flex: 1; font-family: var(--font-head); font-size: 13px; }
+.wsearch svg { flex: none; }
+
+.wlist { max-height: 260px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.wrow {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 11px 8px; border-bottom: 1px solid var(--line2);
+  transition: background 0.13s, padding-left 0.18s var(--ease);
+}
+.wrow:hover:not(:disabled) { background: var(--acc-dim); padding-left: 14px; }
+.wrow:disabled { opacity: 0.42; cursor: not-allowed; }
+.wicon { width: 26px; height: 26px; flex: none; object-fit: contain; display: block; }
+.wicon.fallback {
+  display: grid; place-items: center; border: 1px solid var(--line);
+  font-family: var(--font-head); font-size: 12px; font-weight: 600; color: var(--ink2);
+}
+.wname { flex: 1; text-align: left; font-family: var(--font-head); font-size: 14px; font-weight: 500; }
+.wtag {
+  font-family: var(--font-label); font-size: 9px; font-weight: 600; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink3); border: 1px solid var(--line2); padding: 3px 7px;
+}
+.wtag.installed { color: var(--up); border-color: color-mix(in srgb, var(--up) 45%, transparent); }
+.wchev { color: var(--ink3); font-size: 15px; line-height: 1; }
+.wsep { padding: 14px 8px 6px; }
+
+/* ---- two-way picker (public / private) ---- */
+.pickrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pick {
+  text-align: left; padding: 12px 13px; border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px; transition: border-color 0.15s, background 0.15s;
+}
+.pick b { font-family: var(--font-head); font-size: 13.5px; font-weight: 600; }
+.pick span { color: var(--ink2); font-size: 12px; line-height: 1.45; }
+.pick:hover { border-color: var(--ink3); }
+.pick.on { border-color: var(--acc); background: var(--acc-dim); }
+
+/* ---- rank picker in a roster row ---- */
+.rankpick {
+  font-family: var(--font-label); font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink2); border: 1px solid var(--line2);
+  padding: 4px 6px; cursor: pointer;
+}
+.rankpick:hover { border-color: var(--acc); color: var(--acc); }
+.rankpick option { background: var(--bg2); color: var(--ink); text-transform: none; letter-spacing: 0; }

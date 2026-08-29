@@ -3,7 +3,6 @@ import { connect as connectWallet, signMessage } from './wallet.js'
 
 const TOKEN_KEY = 'clans.session'
 const Ctx = createContext(null)
-export const useWorld = () => useContext(Ctx)
 
 async function call(path, { method = 'GET', body, token } = {}) {
   const res = await fetch(path, {
@@ -16,7 +15,12 @@ async function call(path, { method = 'GET', body, token } = {}) {
   })
   let json = null
   try { json = await res.json() } catch { /* empty body */ }
-  if (!res.ok) throw new Error(json?.error || `request failed (${res.status})`)
+  if (!res.ok) {
+    // A 404 on our own API means the page is talking to something that is not
+    // the game server — say that, rather than showing a bare status code.
+    if (res.status === 404) throw new Error('The game server is not reachable. Is it running?')
+    throw new Error(json?.error || `Something went wrong (${res.status})`)
+  }
   return json
 }
 
@@ -24,6 +28,21 @@ const EMPTY = {
   clans: [], tiles: [], wars: [], bounties: [], events: [],
   stats: { totalTiles: 0, takenTiles: 0, claimedPct: 0, clans: 0, wallets: 0, liveWars: 0, openBounties: 0 },
 }
+
+/* Rendering outside the provider should degrade to an empty world, never to a
+   blank page. */
+const noop = async () => { throw new Error('The world is not loaded yet.') }
+const FALLBACK = {
+  ...EMPTY,
+  status: 'loading', me: null, signedIn: false,
+  signIn: noop, signOut: noop, refresh: noop, toast: () => {},
+  clanBy: () => null, myClan: null, myRole: null,
+  foundClan: noop, joinClan: noop, acceptMember: noop, declineMember: noop,
+  setRole: noop, leaveClan: noop, registerCoin: noop, declareWar: noop,
+  postBounty: noop, claimBounty: noop, releaseBounty: noop,
+}
+
+export const useWorld = () => useContext(Ctx) ?? FALLBACK
 
 export function WorldProvider({ children, onToast }) {
   const [world, setWorld] = useState(EMPTY)
@@ -108,6 +127,8 @@ export function WorldProvider({ children, onToast }) {
     foundClan: (payload) => act('/api/clans', payload),
     joinClan: (id) => act(`/api/clans/${id}/join`),
     acceptMember: (id, address) => act(`/api/clans/${id}/accept`, { address }),
+    declineMember: (id, address) => act(`/api/clans/${id}/decline`, { address }),
+    setRole: (id, address, role) => act(`/api/clans/${id}/role`, { address, role }),
     leaveClan: (id) => act(`/api/clans/${id}/leave`),
     registerCoin: (id, txHash) => act(`/api/clans/${id}/coin`, { txHash }),
     declareWar: (target, hours) => act('/api/wars', { target, hours }),

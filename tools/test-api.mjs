@@ -67,7 +67,10 @@ console.log(`\n--- clans.land api check against ${API} ---\n`)
 const alice = await signIn()
 const bob = await signIn()
 const carol = await signIn()
-check('three wallets signed in with real signatures', !!alice.token && !!bob.token && !!carol.token)
+const dave = await signIn()
+const erin = await signIn()
+const frank = await signIn()
+check('wallets signed in with real signatures', !!alice.token && !!bob.token && !!carol.token)
 
 // A forged signature must not be accepted.
 {
@@ -87,7 +90,7 @@ const before = (await call('/api/world')).json
 const capA = freeSpot(before)
 const A = await call('/api/clans', {
   method: 'POST', token: alice.token,
-  body: { name: 'Ember Court', tag: 'EM' + stamp, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: capA },
+  body: { name: 'Ember Court', tag: 'EM' + stamp, entry: 'public', region: 'Worldwide', lang: 'English', crest, cap: capA },
 })
 check('alice founded a clan', A.status === 200, A.json.error || A.json.clan?.tag)
 const tagA = A.json.clan?.tag
@@ -99,7 +102,7 @@ check('a new clan starts on 9 tiles (6 banner + 3 for the leader)', A.json.clan?
 {
   const dup = await call('/api/clans', {
     method: 'POST', token: bob.token,
-    body: { name: 'Copycat', tag: tagA, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: freeSpot(before, 120) },
+    body: { name: 'Copycat', tag: tagA, entry: 'public', region: 'Worldwide', lang: 'English', crest, cap: freeSpot(before, 120) },
   })
   check('a taken tag is refused', dup.status === 409, dup.json.error)
 }
@@ -108,7 +111,7 @@ check('a new clan starts on 9 tiles (6 banner + 3 for the leader)', A.json.clan?
 {
   const overlap = await call('/api/clans', {
     method: 'POST', token: bob.token,
-    body: { name: 'Squatters', tag: 'SQ' + stamp, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: capA },
+    body: { name: 'Squatters', tag: 'SQ' + stamp, entry: 'public', region: 'Worldwide', lang: 'English', crest, cap: capA },
   })
   check('a capital on claimed ground is refused', overlap.status === 409, overlap.json.error)
 }
@@ -118,7 +121,7 @@ const afterA = (await call('/api/world')).json
 const capB = freeSpot(afterA, 60)
 const B = await call('/api/clans', {
   method: 'POST', token: bob.token,
-  body: { name: 'Nightdesk', tag: 'ND' + stamp, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: capB },
+  body: { name: 'Nightdesk', tag: 'ND' + stamp, entry: 'public', region: 'Worldwide', lang: 'English', crest, cap: capB },
 })
 check('bob founded a second clan', B.status === 200, B.json.error || B.json.clan?.tag)
 const idB = B.json.clan?.id
@@ -155,6 +158,56 @@ const sumLand = worldAnon.clans.reduce((n, c) => n + c.land, 0)
 check('painted tiles equal the sum of every clan holding', sumLand === worldAnon.tiles.length,
   `${sumLand} vs ${worldAnon.tiles.length}`)
 check('the world grew since the start', worldAnon.stats.clans > before.stats.clans)
+
+// A private clan collects requests instead of letting people walk in.
+{
+  const world = (await call('/api/world')).json
+  const P = await call('/api/clans', {
+    method: 'POST', token: dave.token,
+    body: { name: 'Nightdesk', tag: 'PV' + stamp, entry: 'private', region: 'Worldwide', lang: 'English', crest, cap: freeSpot(world, 200) },
+  })
+  check('a private clan was founded', P.status === 200, P.json.error)
+  const idP = P.json.clan?.id
+
+  const ask = await call(`/api/clans/${idP}/join`, { method: 'POST', token: erin.token })
+  check('joining a private clan only asks', ask.status === 200 && ask.json.requested === true, JSON.stringify(ask.json))
+
+  const notYet = (await call('/api/world')).json.clans.find((c) => c.id === idP)
+  check('the clan shows one wallet waiting', notYet?.requests?.length === 1, `got ${notYet?.requests?.length}`)
+  check('and has not gained a member yet', notYet?.members === 1)
+
+  const outsider = await call(`/api/clans/${idP}/accept`, { method: 'POST', token: bob.token, body: { address: erin.account.address } })
+  check('an outsider cannot approve a request', outsider.status === 403, outsider.json.error)
+
+  const yes = await call(`/api/clans/${idP}/accept`, { method: 'POST', token: dave.token, body: { address: erin.account.address } })
+  check('the leader approves the request', yes.status === 200, yes.json.error)
+
+  const after = (await call('/api/world')).json.clans.find((c) => c.id === idP)
+  check('the approved wallet is in the roster', after?.members === 2, `got ${after?.members}`)
+  check('the request is cleared', after?.requests?.length === 0)
+  check('approving grew the land by three tiles', after?.land === 12, `got ${after?.land}`)
+
+  // Ranks: only the leader hands them out.
+  const notLeader = await call(`/api/clans/${idP}/role`, { method: 'POST', token: erin.token, body: { address: dave.account.address, role: 'member' } })
+  check('a member cannot change ranks', notLeader.status === 403, notLeader.json.error)
+
+  const promote = await call(`/api/clans/${idP}/role`, { method: 'POST', token: dave.token, body: { address: erin.account.address, role: 'elder' } })
+  check('the leader promotes a member to elder', promote.status === 200, promote.json.error)
+  const ranked = (await call('/api/world')).json.clans.find((c) => c.id === idP)
+  check('the new rank is stored', ranked?.roster.find((m) => m.address === erin.account.address)?.role === 'elder')
+
+  // Declining a request removes it. Frank has no clan, so his ask is real.
+  const ask2 = await call(`/api/clans/${idP}/join`, { method: 'POST', token: frank.token })
+  check('a second wallet asked to join', ask2.status === 200 && ask2.json.requested === true, JSON.stringify(ask2.json))
+  const waiting = (await call('/api/world')).json.clans.find((c) => c.id === idP)
+  check('it is waiting in the queue', waiting?.requests?.length === 1, `got ${waiting?.requests?.length}`)
+
+  const no = await call(`/api/clans/${idP}/decline`, { method: 'POST', token: erin.token, body: { address: frank.account.address } })
+  check('an elder can decline a request', no.status === 200, no.json.error)
+  const cleared = (await call('/api/world')).json.clans.find((c) => c.id === idP)
+  check('a declined request is gone', cleared?.requests?.length === 0)
+  check('and the declined wallet did not get in', cleared?.members === 2)
+}
 
 // War: only a leader can declare, and it locks both sides.
 {
@@ -193,7 +246,7 @@ check('the world grew since the start', worldAnon.stats.clans > before.stats.cla
 {
   const anon = await call('/api/clans', {
     method: 'POST',
-    body: { name: 'Ghosts', tag: 'GH' + stamp, entry: 'open', region: 'Worldwide', lang: 'English', crest, cap: capA },
+    body: { name: 'Ghosts', tag: 'GH' + stamp, entry: 'public', region: 'Worldwide', lang: 'English', crest, cap: capA },
   })
   check('an unsigned request cannot change the world', anon.status === 401)
 }

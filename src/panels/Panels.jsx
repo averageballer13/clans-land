@@ -8,7 +8,8 @@ import { launchClanCoin, launchPreflight } from '../lib/launch.js'
 const eth = (n) => `${n > 0 ? '+' : ''}${Number(n).toFixed(3)} ${CHAIN.gas}`
 const cls = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'faint')
 const ROLE_LABEL = { leader: 'Leader', coleader: 'Co Leader', elder: 'Elder', member: 'Member' }
-const ENTRY_LABEL = { open: 'Open', request: 'Request', invite: 'Invite only' }
+const ENTRY_LABEL = { public: 'Public', private: 'Private' }
+const isPublic = (c) => c.entry === 'public'
 
 function ago(ts) {
   const s = Math.max(0, (Date.now() - ts) / 1000)
@@ -110,13 +111,13 @@ export function Directory({ go, toast }) {
   const { clans, joinClan, signedIn, me } = useWorld()
   const [tab, setTab] = useState('all')
   const [busy, run] = useAction(toast)
-  const list = clans.filter((c) => (tab === 'all' ? true : tab === 'open' ? c.entry === 'open' : c.entry !== 'open'))
+  const list = clans.filter((c) => (tab === 'all' ? true : tab === 'public' ? isPublic(c) : !isPublic(c)))
 
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '2px 0 10px' }}>
         <div className="seg" style={{ flex: 1 }}>
-          {[['all', 'All'], ['open', 'Open'], ['closed', 'Invite only']].map(([k, l]) => (
+          {[['all', 'All'], ['public', 'Public'], ['private', 'Private']].map(([k, l]) => (
             <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
           ))}
         </div>
@@ -149,13 +150,13 @@ export function Directory({ go, toast }) {
           </div>
           <button
             className="btn small"
-            disabled={busy || !signedIn || !!me?.clan || c.entry === 'invite'}
+            disabled={busy || !signedIn || !!me?.clan}
             onClick={(e) => {
               e.stopPropagation()
-              run(() => joinClan(c.id), c.entry === 'open' ? `Joined ${c.tag}` : `Request sent to ${c.tag}`)
+              run(() => joinClan(c.id), isPublic(c) ? `Joined ${c.tag}` : `Asked to join ${c.tag}`)
             }}
           >
-            {c.entry === 'open' ? 'Join' : c.entry === 'request' ? 'Request' : 'Closed'}
+            {isPublic(c) ? 'Join' : 'Ask to join'}
           </button>
         </div>
       ))}
@@ -483,7 +484,7 @@ export function Found({ toast, capital, pickMode, onPickCapital, go }) {
   const [busy, run] = useAction(toast)
   const [name, setName] = useState('')
   const [tag, setTag] = useState('')
-  const [entry, setEntry] = useState('open')
+  const [entry, setEntry] = useState('public')
   const [region, setRegion] = useState('Worldwide')
   const [spec, setSpec] = useState(() => randomCrest('SEED'))
   const set = (k) => (v) => setSpec((s) => ({ ...s, [k]: v }))
@@ -582,13 +583,19 @@ export function Found({ toast, capital, pickMode, onPickCapital, go }) {
           <span className="lbl">Tag {taken && <span className="down">· already taken</span>}</span>
           <input value={tag} maxLength={6} onChange={(e) => setTag(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} placeholder="EMBR" />
         </label>
-        <label className="field"><span className="lbl">Entry</span>
-          <select value={entry} onChange={(e) => setEntry(e.target.value)}>
-            <option value="open">Open — anyone joins</option>
-            <option value="request">Request to join</option>
-            <option value="invite">Invite only</option>
-          </select>
-        </label>
+        <div className="field">
+          <span className="lbl">Who can join</span>
+          <div className="pickrow">
+            <button className={`pick ${entry === 'public' ? 'on' : ''}`} onClick={() => setEntry('public')}>
+              <b>Public</b>
+              <span>Anyone joins straight away.</span>
+            </button>
+            <button className={`pick ${entry === 'private' ? 'on' : ''}`} onClick={() => setEntry('private')}>
+              <b>Private</b>
+              <span>People ask, and you approve each one.</span>
+            </button>
+          </div>
+        </div>
         <label className="field"><span className="lbl">Region</span>
           <input value={region} maxLength={40} onChange={(e) => setRegion(e.target.value)} />
         </label>
@@ -722,11 +729,12 @@ function LaunchCoin({ clan, toast }) {
 /* ================= Clan detail ================= */
 export function ClanDetail({ id, toast, focus, go }) {
   const world = useWorld()
-  const { clanBy, me, myRole, signedIn, joinClan, leaveClan, wars } = world
+  const { clanBy, me, myRole, signedIn, joinClan, leaveClan, wars, acceptMember, declineMember, setRole } = world
   const c = clanBy(id)
   const [tab, setTab] = useState('roster')
   const [busy, run] = useAction(toast)
   const mine = me?.clan?.id === id
+  const canManage = mine && ['leader', 'coleader', 'elder'].includes(myRole)
   const history = useMemo(() => wars.filter((w) => w.a === id || w.b === id), [wars, id])
 
   if (!c) return <Empty title="That clan is gone" copy="It disbanded, or it never existed." action="Open the directory" onAction={() => go('directory')} />
@@ -771,9 +779,9 @@ export function ClanDetail({ id, toast, focus, go }) {
 
       <div className="chainrow" style={{ marginBottom: 8 }}>
         {!mine && (
-          <button className="btn small solid" disabled={busy || !signedIn || !!me?.clan || c.entry === 'invite'}
-            onClick={() => run(() => joinClan(c.id), c.entry === 'open' ? `Joined ${c.tag}` : `Request sent to ${c.tag}`)}>
-            {c.entry === 'open' ? 'Join clan' : c.entry === 'request' ? 'Request to join' : 'Invite only'}
+          <button className="btn small solid" disabled={busy || !signedIn || !!me?.clan}
+            onClick={() => run(() => joinClan(c.id), isPublic(c) ? `Joined ${c.tag}` : `Asked to join ${c.tag}`)}>
+            {isPublic(c) ? 'Join clan' : 'Ask to join'}
           </button>
         )}
         {mine && (
@@ -789,6 +797,32 @@ export function ClanDetail({ id, toast, focus, go }) {
         ))}
       </div>
 
+      {tab === 'roster' && canManage && c.requests?.length > 0 && (
+        <>
+          <div className="rolehead">Waiting to join · {c.requests.length}</div>
+          {c.requests.map((r) => (
+            <div className="member" key={r.address}>
+              <div>
+                <span>{r.handle}</span>
+                <span className="lbl" style={{ marginLeft: 8 }}>{shortAddr(r.address)} · {ago(r.at)}</span>
+              </div>
+              <span style={{ display: 'flex', gap: 8 }}>
+                <button className="btn small solid" disabled={busy}
+                  onClick={() => run(() => acceptMember(c.id, r.address), `${r.handle} is in`)}>Accept</button>
+                <button className="btn small ghost" disabled={busy}
+                  onClick={() => run(() => declineMember(c.id, r.address), 'Declined')}>Decline</button>
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {tab === 'roster' && mine && !canManage && c.entry === 'private' && (
+        <p className="empty-copy" style={{ padding: '14px 0 0' }}>
+          Only the Leader, Co Leaders and Elders see who is waiting to join.
+        </p>
+      )}
+
       {tab === 'roster' && ['leader', 'coleader', 'elder', 'member'].map((role) => {
         const rows = c.roster.filter((m) => m.role === role)
         if (!rows.length) return null
@@ -801,7 +835,21 @@ export function ClanDetail({ id, toast, focus, go }) {
                   <span>{m.handle}</span>
                   <a className="lbl" style={{ marginLeft: 8 }} href={`${CHAIN.explorer}/address/${m.address}`} target="_blank" rel="noreferrer noopener">{shortAddr(m.address)}</a>
                 </div>
-                <span className="lbl">{ago(m.joinedAt)}</span>
+                {myRole === 'leader' && m.role !== 'leader' ? (
+                  <select
+                    className="rankpick"
+                    value={m.role}
+                    disabled={busy}
+                    onChange={(e) => run(() => setRole(c.id, m.address, e.target.value), 'Rank changed')}
+                  >
+                    <option value="member">Member</option>
+                    <option value="elder">Elder</option>
+                    <option value="coleader">Co Leader</option>
+                    <option value="leader">Hand over the clan</option>
+                  </select>
+                ) : (
+                  <span className="lbl">{ago(m.joinedAt)}</span>
+                )}
               </div>
             ))}
           </div>
@@ -850,8 +898,9 @@ export function Rules() {
       </p>
       <h3>Clans</h3>
       <p>
-        Up to {CLAN_MAX} wallets under one crest: a Leader, Co Leaders, Elders and Members. Entry is
-        open, request to join, or invite only. One wallet holds one banner at a time.
+        Up to {CLAN_MAX} wallets under one crest: a Leader, Co Leaders, Elders and Members. A clan is
+        public, so anyone walks in, or private, so the Leader, Co Leaders and Elders approve each
+        wallet that asks. One wallet holds one banner at a time, and only the Leader hands out ranks.
       </p>
       <h3>Land</h3>
       <p>

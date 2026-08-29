@@ -134,6 +134,12 @@ addColumn('wars', 'scan_block', 'INTEGER')
 addColumn('wars', 'wei_a', "TEXT NOT NULL DEFAULT '0'")
 addColumn('wars', 'wei_b', "TEXT NOT NULL DEFAULT '0'")
 
+/* Entry used to be open / request / invite. Two options are enough and
+   nobody could get into an invite-only clan anyway, so they collapse to
+   public and private. */
+db.exec("UPDATE clans SET entry = 'public' WHERE entry = 'open'")
+db.exec("UPDATE clans SET entry = 'private' WHERE entry IN ('request', 'invite')")
+
 export const now = () => Date.now()
 
 export function logEvent(kind, tag, text) {

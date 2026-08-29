@@ -116,6 +116,14 @@ export function clanRow(c) {
       role: m.role,
       joinedAt: m.joined_at,
     })),
+    requests: db
+      .prepare('SELECT address, created_at FROM requests WHERE clan_id = ? ORDER BY created_at')
+      .all(c.id)
+      .map((r) => ({
+        address: r.address,
+        handle: db.prepare('SELECT handle FROM wallets WHERE address = ?').get(r.address)?.handle ?? r.address,
+        at: r.created_at,
+      })),
     coin: c.coin_addr ? { symbol: c.coin_sym, address: c.coin_addr, curve: c.coin_curve, tx: c.coin_tx } : null,
     foundedAt: c.founded_at,
   }

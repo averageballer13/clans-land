@@ -3,8 +3,8 @@ import Globe from './globe/Globe.jsx'
 import Crest from './ui/Crest.jsx'
 import { WorldProvider, useWorld } from './lib/store.jsx'
 import { randomCrest } from './lib/crest.js'
-import { providers, hasWallet } from './lib/wallet.js'
-import { CHAIN, LAUNCHPAD, SITE, TOKEN, WALLETS, WORLD_TILES, shortAddr } from './lib/brand.js'
+import { discover, walletOptions } from './lib/wallet.js'
+import { CHAIN, LAUNCHPAD, SITE, TOKEN, WORLD_TILES, shortAddr } from './lib/brand.js'
 import {
   WorldMap, Directory, Leaderboard, Wars, Bounties, Token, Found, ClanDetail, Rules, Terms,
 } from './panels/Panels.jsx'
@@ -17,9 +17,9 @@ const TITLES = {
 /* ---------------- How it works ---------------- */
 const HOW = [
   { t: 'Connect', c: `Bring a wallet to ${CHAIN.name}. Signing in signs a plain message — no gas, no transaction, no access to your funds.` },
-  { t: 'Form a clan', c: 'Up to 50 wallets under one crest. Leader, Co Leaders, Elders, Members. Open, request, or invite only.' },
+  { t: 'Form a clan', c: 'Up to 50 wallets under one crest. Public and anyone walks in, or private and you approve every wallet yourself.' },
   { t: 'Take land', c: `Plant a capital anywhere still open and the map paints outward: 6 tiles for the banner, 3 more per wallet. ${WORLD_TILES} tiles in the world, shared by everyone.` },
-  { t: 'Deploy the coin', c: `The Leader launches the clan coin on ${LAUNCHPAD.name} and registers it. Every trade accrues creator fees to the coin's own vault.` },
+  { t: 'Deploy the coin', c: `The Leader launches the clan coin on ${LAUNCHPAD.name} in one click. Every trade accrues creator fees to their own wallet.` },
   { t: 'Go to war', c: `One number a side: net ${CHAIN.gas} made during the window. When the clock runs out the winner takes a fifth of the loser's land.` },
 ]
 const DEMO_CRESTS = ['ALPHA', 'BETA', 'GAMMA', 'DELTA'].map(randomCrest)
@@ -60,38 +60,82 @@ function HowItWorks({ onClose }) {
 }
 
 /* ---------------- Wallet sheet ---------------- */
+function WalletIcon({ wallet }) {
+  if (wallet.icon) return <img className="wicon" src={wallet.icon} alt="" />
+  const initial = wallet.name.trim()[0]?.toUpperCase() ?? '?'
+  return <span className="wicon fallback">{initial}</span>
+}
+
 function WalletSheet({ onClose, toast }) {
-  const { signIn } = useWorld()
+  const { signIn, status } = useWorld()
   const [ok, setOk] = useState([false, false])
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
-  const detected = providers()
+  const [wallets, setWallets] = useState(() => walletOptions())
+  const [q, setQ] = useState('')
+
+  // Wallets announce themselves asynchronously, so ask once more on open.
+  useEffect(() => {
+    let alive = true
+    discover().then(() => alive && setWallets(walletOptions()))
+    return () => { alive = false }
+  }, [])
+
   const gates = [
     `I understand Clans.land is a game layer over public ${CHAIN.name} activity and holds none of my funds.`,
     'I accept the Terms of Use and understand nothing here is financial advice.',
   ]
   const ready = ok[0] && ok[1]
+  const needle = q.trim().toLowerCase()
+  const shown = needle ? wallets.filter((w) => w.name.toLowerCase().includes(needle)) : wallets
+  const live = shown.filter((w) => w.installed)
+  const rest = shown.filter((w) => !w.installed)
 
-  const go = async (id, name) => {
-    setBusy(true); setError(null)
+  const go = async (w) => {
+    if (!w.installed) { window.open(w.url, '_blank', 'noopener'); return }
+    setBusy(w.id)
+    setError(null)
     try {
-      const s = await signIn(id)
-      toast(`${name} connected`)
+      await signIn(w.id)
+      toast(`${w.name} connected`)
       onClose()
-      return s
     } catch (e) {
-      setError(e?.message || 'the wallet refused')
+      // 4001 is the user closing their own wallet: not an error worth shouting about.
+      const code = e?.code ?? e?.cause?.code
+      setError(code === 4001 ? 'You closed the wallet before signing.' : (e?.shortMessage || e?.message || 'the wallet refused'))
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
+  const Row = (w) => (
+    <button
+      key={w.id}
+      className={`wrow ${!ready && w.installed ? 'locked' : ''}`}
+      disabled={(!ready && w.installed) || busy !== null}
+      onClick={() => go(w)}
+    >
+      <WalletIcon wallet={w} />
+      <span className="wname">{w.name}</span>
+      {w.installed
+        ? <span className="wtag installed">{busy === w.id ? 'Waiting…' : 'Installed'}</span>
+        : <span className="wtag">Get</span>}
+      <span className="wchev" aria-hidden="true">›</span>
+    </button>
+  )
+
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="sheet">
-        <h2>Connect wallet</h2>
-        <span className="lbl">{CHAIN.name} · chain {CHAIN.id} · you sign a message, never a transaction</span>
-        <div className="tosgate" style={{ marginTop: 16 }}>
+      <div className="sheet wsheet">
+        <div className="whead">
+          <span className="lbl">{CHAIN.name} · chain {CHAIN.id}</span>
+          <h2>Connect Wallet</h2>
+          <button className="wclose" onClick={onClose} aria-label="Close">
+            <svg width="13" height="13" viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" /></svg>
+          </button>
+        </div>
+
+        <div className="tosgate">
           {gates.map((g, i) => (
             <button key={i} className={`tosrow ${ok[i] ? 'on' : ''}`} onClick={() => setOk((o) => o.map((v, n) => (n === i ? !v : v)))}>
               <span className="tosbox">{ok[i] && <span className="tosmark" />}</span>
@@ -100,37 +144,36 @@ function WalletSheet({ onClose, toast }) {
           ))}
         </div>
 
-        {detected.length > 0 ? detected.map((d) => {
-          const known = WALLETS.find((w) => w.id === d.id)
-          return (
-            <button key={d.id} className="wopt" disabled={!ready || busy} onClick={() => go(d.id, d.name)}>
-              <span className="w">{known && <img src={known.logo} alt="" />}{d.name}</span>
-              <span className="lbl">{busy ? 'Waiting…' : 'Connect'}</span>
-            </button>
-          )
-        }) : (
-          <>
-            <p className="empty-copy" style={{ margin: '4px 0 12px' }}>
-              No wallet detected in this browser. Install one, then reload this page.
-            </p>
-            {WALLETS.map((w) => (
-              <a key={w.id} className="wopt" href={
-                w.id === 'metamask' ? 'https://metamask.io/download/'
-                  : w.id === 'rabby' ? 'https://rabby.io/'
-                    : w.id === 'coinbase' ? 'https://www.coinbase.com/wallet/downloads'
-                      : 'https://walletconnect.network/'
-              } target="_blank" rel="noreferrer noopener">
-                <span className="w"><img src={w.logo} alt="" />{w.name}</span>
-                <span className="lbl">Install</span>
-              </a>
-            ))}
-          </>
-        )}
-
-        {error && <p className="empty-copy down" style={{ marginTop: 12 }}>{error}</p>}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
-          <button className="btn small ghost" onClick={onClose}>Cancel</button>
+        <div className="wsearch">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" />
+            <path d="M8 8l3.5 3.5" stroke="currentColor" />
+          </svg>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search wallet" aria-label="Search wallet" />
+          <span className="lbl">{wallets.length}</span>
         </div>
+
+        <div className="wlist">
+          {live.length === 0 && rest.length === 0 && (
+            <p className="empty-copy" style={{ padding: '14px 2px' }}>No wallet matches that name.</p>
+          )}
+          {live.map(Row)}
+          {live.length === 0 && !needle && (
+            <p className="empty-copy" style={{ padding: '10px 2px 14px' }}>
+              No wallet detected in this browser. Pick one below, install it, then reload the page.
+            </p>
+          )}
+          {rest.length > 0 && <div className="wsep"><span className="lbl">Not installed</span></div>}
+          {rest.map(Row)}
+        </div>
+
+        {status === 'offline' && (
+          <p className="empty-copy down" style={{ marginTop: 10 }}>
+            The game server is not reachable, so signing in will not work yet.
+          </p>
+        )}
+        {error && <p className="empty-copy down" style={{ marginTop: 10 }}>{error}</p>}
+        {!ready && <p className="empty-copy" style={{ marginTop: 10 }}>Tick both lines above to connect.</p>}
       </div>
     </div>
   )
