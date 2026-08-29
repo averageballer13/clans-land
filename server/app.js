@@ -231,7 +231,7 @@ app.post('/api/clans', auth, async (req, res) => {
   if (await one('SELECT 1 FROM members WHERE address = $1', [req.address]))
     return fail(res, 409, 'you already belong to a clan')
 
-  const { name, tag: rawTag, entry, region, lang, crest: rawCrest, cap } = req.body || {}
+  const { name, tag: rawTag, entry, region, lang, crest: rawCrest, cap, motto } = req.body || {}
   const tag = String(rawTag || '').toUpperCase()
   if (!TAG_RE.test(tag)) return fail(res, 400, 'tag must be 3 to 6 letters or digits')
   if (typeof name !== 'string' || name.trim().length < 3 || name.length > 24)
@@ -257,10 +257,11 @@ app.post('/api/clans', auth, async (req, res) => {
   try {
     await tx(async () => {
       await run(
-        `INSERT INTO clans (id, tag, name, entry, region, lang, crest, paint, cap_lat, cap_lon, founded_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        `INSERT INTO clans (id, tag, name, entry, region, lang, crest, paint, cap_lat, cap_lon, founded_at, motto)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [id, tag, name.trim(), entry, String(region || 'Worldwide').slice(0, 40),
-          String(lang || 'English').slice(0, 24), JSON.stringify(crest), paint, lat, lon, now()]
+          String(lang || 'English').slice(0, 24), JSON.stringify(crest), paint, lat, lon, now(),
+          String(motto || '').trim().slice(0, 60)]
       )
       await run('INSERT INTO members (address, clan_id, role, joined_at) VALUES ($1, $2, $3, $4)',
         [req.address, id, 'leader', now()])
@@ -339,6 +340,17 @@ app.post('/api/clans/:id/decline', auth, async (req, res) => {
   if (!gone) return fail(res, 404, 'no such request')
   await broadcast()
   res.json({ ok: true })
+})
+
+/* The words on the clan's flag. */
+app.post('/api/clans/:id/motto', auth, async (req, res) => {
+  const me = await one('SELECT * FROM members WHERE address = $1', [req.address])
+  if (!me || me.clan_id !== req.params.id || !['leader', 'coleader'].includes(me.role))
+    return fail(res, 403, 'leader or co leader only')
+  const motto = String(req.body?.motto ?? '').trim().slice(0, 60)
+  await run('UPDATE clans SET motto = $1 WHERE id = $2', [motto, me.clan_id])
+  await broadcast()
+  res.json({ ok: true, motto })
 })
 
 /* Ranks. Only a leader hands them out, and only a leader can pass the banner. */
@@ -509,11 +521,43 @@ export async function maybeScanWars() {
   if (now() - last < SCAN_EVERY || now() < lockedUntil) return false
   await setMeta('scan_lock', now() + SCAN_LOCK_MS)
   try {
-    return await scoreLiveWars()
+    const wars = await scoreLiveWars()
+    const players = await scanWalletPnl()
+    return wars || players
   } finally {
     await setMeta('scan_at', now())
     await setMeta('scan_lock', '0')
   }
+}
+
+/* Every wallet's running total, read from the same bonding-curve logs the wars
+   are scored from. This is what ranks players, and adding a clan's members up
+   is what ranks clans. The cursor lives in the database, so the walk carries on
+   wherever the next request lands. */
+export async function scanWalletPnl() {
+  const wallets = (await many('SELECT address FROM wallets')).map((w) => w.address)
+  if (!wallets.length) return false
+
+  const to = await head()
+  const cursor = Number(await getMeta('pnl_block', '0'))
+  if (!cursor) {
+    // First run: start from here rather than replaying the whole chain.
+    await setMeta('pnl_block', Number(to))
+    return false
+  }
+  const from = BigInt(cursor)
+  if (to <= from) return false
+
+  const { totals, scannedTo } = await scanTrades(wallets, from, to)
+  for (const [address, delta] of totals) {
+    await run(
+      `UPDATE wallets SET pnl_wei = ((pnl_wei)::numeric + $1::numeric)::text, trades = trades + 1
+       WHERE lower(address) = $2`,
+      [delta.toString(), address]
+    )
+  }
+  await setMeta('pnl_block', Number(scannedTo))
+  return totals.size > 0
 }
 
 export async function scoreLiveWars() {

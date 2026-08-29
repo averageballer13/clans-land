@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" role="img" aria-label="Clans.team">
+  <!-- A shield built from map tiles: two arms stepping down to a point, with
+       the claimed strip across the top. -->
+  <g fill="#F4F1EC">
+    <!-- shoulders, either side of the strip -->
+    <rect x="150" y="152" width="42" height="66" />
+    <rect x="308" y="152" width="42" height="66" />
+    <!-- the arms, stepping down and inward -->
+    <rect x="146" y="226" width="42" height="42" />
+    <rect x="312" y="226" width="42" height="42" />
+    <rect x="186" y="268" width="42" height="42" />
+    <rect x="272" y="268" width="42" height="42" />
+    <!-- the point -->
+    <rect x="229" y="310" width="42" height="42" />
+  </g>
+  <!-- the claimed strip -->
+  <rect x="200" y="154" width="100" height="44" fill="#3B2308" stroke="#E8791C" stroke-width="7" />
+</svg>

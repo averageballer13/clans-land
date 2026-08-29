@@ -8,10 +8,10 @@ import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
 import { randomCrest } from '../src/lib/crest.js'
 
 const API = process.env.API || 'http://localhost:8787'
-const [name, tag, lat, lon, entry = 'open'] = process.argv.slice(2)
+const [name, tag, lat, lon, entry = 'public', motto = ''] = process.argv.slice(2)
 
 if (!name || !tag || lat === undefined || lon === undefined) {
-  console.error('usage: node tools/found-clan.mjs "<name>" <TAG> <lat> <lon> [entry]')
+  console.error('usage: node tools/found-clan.mjs "<name>" <TAG> <lat> <lon> [public|private] ["motto"]')
   process.exit(1)
 }
 
@@ -39,7 +39,7 @@ const { token } = await call('/api/auth/verify', { body: { address: account.addr
 const { clan } = await call('/api/clans', {
   token,
   body: {
-    name, tag: tag.toUpperCase(), entry,
+    name, tag: tag.toUpperCase(), entry, motto,
     region: 'Worldwide', lang: 'English',
     crest: randomCrest(tag),
     cap: [Number(lat), Number(lon)],

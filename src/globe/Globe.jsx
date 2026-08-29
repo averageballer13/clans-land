@@ -19,11 +19,15 @@ function vecToLL(v) {
   return [lat, lon]
 }
 
-/* Land paint: a soft tint per tile plus a crisp edge, both merged into one
-   draw call each. The tint stays low so the map underneath stays readable —
-   the edges are what make a territory legible. */
-function buildTileLayers(tiles, colourOf) {
-  const pos = [], col = [], idx = [], epos = [], ecol = []
+/* Land paint.
+
+   A soft tint per tile plus a crisp border, both merged into one draw call.
+   Hovering builds the same pair again for that clan alone, brighter and a hair
+   higher off the surface, which is cheap for one territory and keeps the
+   material plain enough to be certain of what it draws. */
+function tileGeometry(tiles, colourOf, lift) {
+  const pos = [], col = [], idx = []
+  const epos = [], ecol = []
   const SEG = 2
   let n = 0
 
@@ -34,14 +38,9 @@ function buildTileLayers(tiles, colourOf) {
     byRow.get(key).push(t)
   }
   const rowLats = [...byRow.keys()].map(Number).sort((a, b) => a - b)
-  const neighbourAbove = (t) => {
+  const neighbour = (t, step) => {
     const i = rowLats.indexOf(Number(t.lat.toFixed(3)))
-    const row = byRow.get(rowLats[i + 1]?.toFixed(3))
-    return row?.find((o) => Math.abs(o.lon - t.lon) <= o.dLon / 2)?.clan ?? null
-  }
-  const neighbourBelow = (t) => {
-    const i = rowLats.indexOf(Number(t.lat.toFixed(3)))
-    const row = byRow.get(rowLats[i - 1]?.toFixed(3))
+    const row = byRow.get(rowLats[i + step]?.toFixed(3))
     return row?.find((o) => Math.abs(o.lon - t.lon) <= o.dLon / 2)?.clan ?? null
   }
 
@@ -51,7 +50,7 @@ function buildTileLayers(tiles, colourOf) {
 
     for (let i = 0; i <= SEG; i++) {
       for (let j = 0; j <= SEG; j++) {
-        const v = llToVec(lat0 + (t.dLat * i) / SEG, lon0 + (t.dLon * j) / SEG, R * 1.003)
+        const v = llToVec(lat0 + (t.dLat * i) / SEG, lon0 + (t.dLon * j) / SEG, R * lift)
         pos.push(v.x, v.y, v.z)
         col.push(c.r, c.g, c.b)
       }
@@ -69,9 +68,9 @@ function buildTileLayers(tiles, colourOf) {
       [lat0 + t.dLat, lon0 + t.dLon], [lat0 + t.dLat, lon0],
     ]
     const sides = [
-      { a: 0, b: 1, other: neighbourBelow(t) },
+      { a: 0, b: 1, other: neighbour(t, -1) },
       { a: 1, b: 2, other: null },
-      { a: 2, b: 3, other: neighbourAbove(t) },
+      { a: 2, b: 3, other: neighbour(t, 1) },
       { a: 3, b: 0, other: null },
     ]
     for (const s of sides) {
@@ -79,9 +78,9 @@ function buildTileLayers(tiles, colourOf) {
       const steps = 6
       const [la1, lo1] = corners[s.a], [la2, lo2] = corners[s.b]
       for (let k = 0; k < steps; k++) {
-        const p = llToVec(la1 + ((la2 - la1) * k) / steps, lo1 + ((lo2 - lo1) * k) / steps, R * 1.006)
-        const q = llToVec(la1 + ((la2 - la1) * (k + 1)) / steps, lo1 + ((lo2 - lo1) * (k + 1)) / steps, R * 1.006)
-        epos.push(p.x, p.y, p.z, q.x, q.y, q.z)
+        const q1 = llToVec(la1 + ((la2 - la1) * k) / steps, lo1 + ((lo2 - lo1) * k) / steps, R * (lift + 0.003))
+        const q2 = llToVec(la1 + ((la2 - la1) * (k + 1)) / steps, lo1 + ((lo2 - lo1) * (k + 1)) / steps, R * (lift + 0.003))
+        epos.push(q1.x, q1.y, q1.z, q2.x, q2.y, q2.z)
         ecol.push(c.r, c.g, c.b, c.r, c.g, c.b)
       }
     }
@@ -91,37 +90,120 @@ function buildTileLayers(tiles, colourOf) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
   g.setIndex(idx)
-  const fill = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.17,
-    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-  }))
 
   const eg = new THREE.BufferGeometry()
   eg.setAttribute('position', new THREE.Float32BufferAttribute(epos, 3))
   eg.setAttribute('color', new THREE.Float32BufferAttribute(ecol, 3))
-  const edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.62, depthWrite: false,
-  }))
 
+  return { g, eg }
+}
+
+function buildTileLayers(tiles, colourOf, { lift = 1.003, fillOpacity = 0.24, edgeOpacity = 0.6 } = {}) {
+  const { g, eg } = tileGeometry(tiles, colourOf, lift)
+  const fill = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: fillOpacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  }))
+  const edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: edgeOpacity, depthWrite: false,
+  }))
   return { fill, edges }
 }
 
-function buildCapitals(clans) {
+/* The flag a clan plants on its capital: a mast tall enough to clear the
+   horizon, and a banner carrying the tag, the motto and what the clan has
+   made. Drawn to a canvas and hung on a sprite so it always faces the reader,
+   whichever way the world has turned. */
+function flagTexture(clan) {
+  const W = 512, H = 216
+  const cv = document.createElement('canvas')
+  cv.width = W
+  cv.height = H
+  const c = cv.getContext('2d')
+
+  const pnl = clan.pnl ?? 0
+  const money = `${pnl > 0 ? '+' : ''}${pnl.toFixed(3)} ETH`
+
+  c.fillStyle = 'rgba(8,9,11,0.88)'
+  c.fillRect(0, 0, W, H)
+  c.fillStyle = clan.paint
+  c.fillRect(0, 0, 12, H)
+  c.strokeStyle = clan.paint
+  c.lineWidth = 3
+  c.strokeRect(1.5, 1.5, W - 3, H - 3)
+
+  c.textBaseline = 'middle'
+  c.fillStyle = '#f4f1ec'
+  c.font = '700 62px "Space Grotesk", "Segoe UI", sans-serif'
+  c.fillText(clan.tag, 34, 52)
+
+  c.fillStyle = clan.paint
+  c.font = '600 30px "Outfit", "Segoe UI", sans-serif'
+  c.fillText(`LVL ${clan.lvl}  ·  ${clan.land} TILES`, 34, 104)
+
+  if (clan.motto) {
+    c.fillStyle = '#9aa1a9'
+    c.font = 'italic 30px "Fraunces", Georgia, serif'
+    const motto = clan.motto.length > 34 ? clan.motto.slice(0, 33) + '…' : clan.motto
+    c.fillText(motto, 34, 146)
+  }
+
+  c.fillStyle = pnl > 0 ? '#2ec27e' : pnl < 0 ? '#e14b62' : '#676e77'
+  c.font = '700 38px "Space Grotesk", "Segoe UI", sans-serif'
+  c.fillText(money, 34, 188)
+
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+const MAST = 0.11 // how far the mast rises above the surface
+
+function buildFlags(clans) {
   const group = new THREE.Group()
   for (const c of clans) {
-    const base = llToVec(c.cap[0], c.cap[1], R * 1.005)
-    const top = llToVec(c.cap[0], c.cap[1], R * (1.06 + Math.min(c.land, 90) / 900))
+    const base = llToVec(c.cap[0], c.cap[1], R * 1.002)
+    const topR = R * (1 + MAST + Math.min(c.land, 120) / 2400)
+    const top = llToVec(c.cap[0], c.cap[1], topR)
     const col = new THREE.Color(c.paint)
-    group.add(new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([base, top]),
-      new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.85 })
-    ))
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.009, 12, 12), new THREE.MeshBasicMaterial({ color: col }))
-    dot.position.copy(top)
-    group.add(dot)
+
+    // The mast: a thin cylinder rather than a line, so it survives at any zoom.
+    const mast = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0025, 0.004, base.distanceTo(top), 6),
+      new THREE.MeshBasicMaterial({ color: col })
+    )
+    mast.position.copy(base.clone().add(top).multiplyScalar(0.5))
+    mast.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), top.clone().sub(base).normalize())
+    mast.material.transparent = true
+    mast.userData.faces = true
+    group.add(mast)
+
+    const banner = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flagTexture(c), transparent: true, depthWrite: false, depthTest: true,
+    }))
+    banner.scale.set(0.2, 0.084, 1)
+    // Hung off one side of the mast, like a flag rather than a label.
+    banner.position.copy(top)
+    banner.center.set(-0.03, 0.9)
+    banner.userData.clan = c.id
+    banner.userData.faces = true
+    group.add(banner)
+
+    const knob = new THREE.Mesh(
+      new THREE.SphereGeometry(0.008, 12, 12),
+      new THREE.MeshBasicMaterial({ color: col })
+    )
+    knob.position.copy(top)
+    knob.material.transparent = true
+    knob.userData.faces = true
+    group.add(knob)
+
     const halo = new THREE.Mesh(
-      new THREE.RingGeometry(0.02, 0.032, 32),
-      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+      new THREE.RingGeometry(0.022, 0.038, 32),
+      new THREE.MeshBasicMaterial({
+        color: col, transparent: true, opacity: 0.5, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      })
     )
     halo.position.copy(base)
     halo.lookAt(base.clone().multiplyScalar(2))
@@ -345,6 +427,7 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
     api.current.world = world
     if (import.meta.env.DEV) window.__globe = { renderer, scene, camera, api: api.current }
 
+    const _p = new THREE.Vector3()
     let raf = 0
     let last = performance.now()
     const tick = (now) => {
@@ -363,10 +446,19 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
       stars.rotation.y += 0.000012 * dt
 
       const t = now * 0.001
-      api.current.capitals?.children.forEach((c) => {
+      api.current.flags?.children.forEach((c) => {
         if (c.userData.pulse !== undefined) {
           c.scale.setScalar(1 + Math.sin(t * 1.4 + c.userData.pulse) * 0.28)
           c.material.opacity = 0.5 - Math.sin(t * 1.4 + c.userData.pulse) * 0.22
+        }
+        // A mast tall enough to clear the horizon also shows its flag from the
+        // far side of the world, which reads as a flag in the wrong place.
+        if (c.userData.faces) {
+          const p = c.getWorldPosition(_p)
+          const facing = p.clone().normalize().dot(camera.position.clone().sub(p).normalize())
+          const show = THREE.MathUtils.clamp((facing - 0.02) * 6, 0, 1)
+          c.material.opacity = show
+          c.visible = show > 0.02
         }
       })
       if (pin.visible) pinRing.scale.setScalar(1 + Math.sin(t * 3) * 0.18)
@@ -380,6 +472,7 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
           hoverLL = vecToLL(local)
           const tile = tileAt(hoverLL[0], hoverLL[1])
           hoverTile = tile
+          api.current.setActiveClan?.(tile?.clan ?? null)
           api.current.onHover?.({ clan: tile?.clan ?? null, lat: hoverLL[0], lon: hoverLL[1] }, pointerPx)
           canvas.style.cursor = dragging ? 'grabbing'
             : api.current.pickMode ? 'crosshair'
@@ -387,6 +480,7 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
         } else if (hoverLL) {
           hoverLL = null
           hoverTile = null
+          api.current.setActiveClan?.(null)
           api.current.onHover?.(null, pointerPx)
         }
       }
@@ -418,7 +512,7 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
   useEffect(() => { api.current.setMarker?.(marker) }, [marker])
   useEffect(() => { if (focus && api.current.flyTo) api.current.flyTo(focus[0], focus[1], focus[2] ?? 2.1) }, [focus])
 
-  /* ---- land and capitals, rebuilt whenever the shared world changes ---- */
+  /* ---- land and flags, rebuilt whenever the shared world changes ---- */
   useEffect(() => {
     const world = api.current.world
     if (!world) return
@@ -426,14 +520,30 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
     const colourOf = (id) => paint.get(id) || '#ff6a00'
 
     const { fill, edges } = buildTileLayers(tiles, colourOf)
-    const capitals = buildCapitals(clans)
-    world.add(fill, edges, capitals)
-    api.current.capitals = capitals
+    const flags = buildFlags(clans)
+    world.add(fill, edges, flags)
+    api.current.flags = flags
+
+    /* Hovering a territory paints that clan's ground again, brighter. */
+    let lit = null
+    let litId = null
+    api.current.setActiveClan = (id) => {
+      if (id === litId) return
+      litId = id
+      if (lit) { world.remove(lit.fill, lit.edges); disposeTree(lit.fill); disposeTree(lit.edges); lit = null }
+      if (!id) return
+      const own = tiles.filter((t) => t.clan === id)
+      if (!own.length) return
+      lit = buildTileLayers(own, colourOf, { lift: 1.006, fillOpacity: 0.62, edgeOpacity: 1 })
+      world.add(lit.fill, lit.edges)
+    }
 
     return () => {
-      world.remove(fill, edges, capitals)
-      disposeTree(fill); disposeTree(edges); disposeTree(capitals)
-      if (api.current.capitals === capitals) api.current.capitals = null
+      api.current.setActiveClan = null
+      if (lit) { world.remove(lit.fill, lit.edges); disposeTree(lit.fill); disposeTree(lit.edges) }
+      world.remove(fill, edges, flags)
+      disposeTree(fill); disposeTree(edges); disposeTree(flags)
+      if (api.current.flags === flags) api.current.flags = null
     }
   }, [tiles, clans])
 

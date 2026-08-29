@@ -166,24 +166,64 @@ export function Directory({ go, toast }) {
 
 /* ================= Leaderboard ================= */
 export function Leaderboard({ go }) {
-  const { clans } = useWorld()
+  const { clans, players } = useWorld()
+  const [side, setSide] = useState('clans')
   const [tab, setTab] = useState('trophies')
   const sorted = [...clans].sort((a, b) => {
     if (tab === 'land') return b.land - a.land
     if (tab === 'members') return b.members - a.members
-    if (tab === 'level') return b.xp - a.xp
+    if (tab === 'pnl') return b.pnl - a.pnl
     return b.trophies - a.trophies
   })
   const val = (c) =>
     tab === 'land' ? <span className="num">{c.land}</span>
       : tab === 'members' ? <span className="num">{c.members}</span>
-        : tab === 'level' ? <span className="num gold">{c.xp} xp</span>
+        : tab === 'pnl' ? <span className={`num ${cls(c.pnl)}`}>{eth(c.pnl)}</span>
           : <span className="num gold">{c.trophies}</span>
+
+  if (side === 'players') {
+    const ranked = [...(players ?? [])].sort((a, b) => b.pnl - a.pnl)
+    return (
+      <>
+        <div className="seg" style={{ marginBottom: 6 }}>
+          <button onClick={() => setSide('clans')}>Clans</button>
+          <button className="on">Players</button>
+        </div>
+        <p className="muted" style={{ fontSize: 13, lineHeight: 1.55, margin: '10px 0 6px' }}>
+          Net {CHAIN.gas} each wallet has made trading on {LAUNCHPAD.name}, read straight off{' '}
+          {CHAIN.name}. Nobody reports their own number.
+        </p>
+        {ranked.filter((p) => p.trades > 0).length === 0 && (
+          <Empty
+            title="No trades counted yet"
+            copy={`As soon as a wallet that has signed in buys or sells on ${LAUNCHPAD.name}, it appears here.`}
+          />
+        )}
+        {ranked.map((p, i) => (
+          <div className="lb-row lb-row-4" key={p.address}>
+            <span className={`lb-rank r${i + 1}`}>{i + 1}</span>
+            <span className="mapicon" style={{ width: 32, height: 32 }}>
+              {p.clan ? <Crest tag={p.clan} spec={clans.find((c) => c.id === p.clan)?.crest} size={26} /> : <span className="faint">—</span>}
+            </span>
+            <div className="lb-name">
+              <div className="n">{p.handle}</div>
+              <div className="t">{p.clan ? `[${p.clan.toUpperCase()}]` : 'no clan'} · {p.trades} trades · {shortAddr(p.address)}</div>
+            </div>
+            <div className={`lb-val ${cls(p.pnl)}`}>{eth(p.pnl)}</div>
+          </div>
+        ))}
+      </>
+    )
+  }
 
   return (
     <>
       <div className="seg" style={{ marginBottom: 6 }}>
-        {[['trophies', 'Trophies'], ['land', 'Land'], ['members', 'Members'], ['level', 'Level']].map(([k, l]) => (
+        <button className="on">Clans</button>
+        <button onClick={() => setSide('players')}>Players</button>
+      </div>
+      <div className="seg" style={{ marginBottom: 6, marginTop: 8 }}>
+        {[['trophies', 'Trophies'], ['pnl', 'Profit'], ['land', 'Land'], ['members', 'Members']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -201,7 +241,7 @@ export function Leaderboard({ go }) {
           <Crest tag={c.tag} spec={c.crest} size={32} className="shield-mini" />
           <div className="lb-name">
             <div className="n">{c.name}<span className="lvlchip">LVL {c.lvl}</span>{c.coin && <span className="coinchip">${c.coin.symbol}</span>}</div>
-            <div className="t">{c.tag} · {c.members} of {CLAN_MAX} · {c.wins}W {c.losses}L · {c.land} tiles</div>
+            <div className="t">{c.tag} · {c.members} of {CLAN_MAX} · {c.land} tiles · {eth(c.pnl)}</div>
           </div>
           <div className="lb-val">{val(c)}</div>
         </div>
@@ -486,6 +526,7 @@ export function Found({ toast, capital, pickMode, onPickCapital, go }) {
   const [tag, setTag] = useState('')
   const [entry, setEntry] = useState('public')
   const [region, setRegion] = useState('Worldwide')
+  const [motto, setMotto] = useState('')
   const [spec, setSpec] = useState(() => randomCrest('SEED'))
   const set = (k) => (v) => setSpec((s) => ({ ...s, [k]: v }))
   const taken = clans.some((c) => c.tag === tag)
@@ -596,6 +637,10 @@ export function Found({ toast, capital, pickMode, onPickCapital, go }) {
             </button>
           </div>
         </div>
+        <label className="field">
+          <span className="lbl">Motto · flies on your flag</span>
+          <input value={motto} maxLength={60} onChange={(e) => setMotto(e.target.value)} placeholder="Nobody wins alone." />
+        </label>
         <label className="field"><span className="lbl">Region</span>
           <input value={region} maxLength={40} onChange={(e) => setRegion(e.target.value)} />
         </label>
@@ -616,7 +661,7 @@ export function Found({ toast, capital, pickMode, onPickCapital, go }) {
       <div className="chainrow" style={{ marginTop: 20 }}>
         <button className="btn solid" disabled={!ready || busy}
           onClick={() => run(
-            () => foundClan({ name, tag, entry, region, lang: 'English', crest: spec, cap: capital }),
+            () => foundClan({ name, tag, entry, region, motto, lang: 'English', crest: spec, cap: capital }),
             `${tag} founded`
           )}>
           {busy ? 'Founding…' : 'Found the clan'}
@@ -746,6 +791,7 @@ export function ClanDetail({ id, toast, focus, go }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="num" style={{ fontSize: 19, fontWeight: 600 }}>{c.name}<span className="lvlchip big">LVL {c.lvl}</span></div>
           <span className="lbl">[{c.tag}] · {c.members} of {CLAN_MAX} · {ENTRY_LABEL[c.entry]} · {c.region}</span>
+          {c.motto && <div className="clanmotto">“{c.motto}”</div>}
           <div className="xpbar"><div className="fill" style={{ width: `${Math.round((c.xpInLevel / Math.max(1, c.xpToNext)) * 100)}%` }} /></div>
           <div className="lbl" style={{ marginTop: 6 }}>{c.xpInLevel} / {c.xpToNext} xp to level {c.lvl + 1}</div>
         </div>
@@ -755,7 +801,7 @@ export function ClanDetail({ id, toast, focus, go }) {
         <div className="stat"><span className="lbl">Trophies</span><span className="v gold">{c.trophies}</span></div>
         <div className="stat"><span className="lbl">Land</span><span className="v">{c.land}</span></div>
         <div className="stat"><span className="lbl">Record</span><span className="v">{c.wins}W {c.losses}L</span></div>
-        <div className="stat"><span className="lbl">Founded</span><span className="v" style={{ fontSize: 14 }}>{ago(c.foundedAt)}</span></div>
+        <div className="stat"><span className="lbl">Profit</span><span className={`v ${cls(c.pnl)}`}>{eth(c.pnl)}</span></div>
       </div>
 
       {c.coin ? (
@@ -834,6 +880,7 @@ export function ClanDetail({ id, toast, focus, go }) {
                 <div>
                   <span>{m.handle}</span>
                   <a className="lbl" style={{ marginLeft: 8 }} href={`${CHAIN.explorer}/address/${m.address}`} target="_blank" rel="noreferrer noopener">{shortAddr(m.address)}</a>
+                  <span className={`num ${cls(m.pnl)}`} style={{ marginLeft: 10, fontSize: 12 }}>{eth(m.pnl)}</span>
                 </div>
                 {myRole === 'leader' && m.role !== 'leader' ? (
                   <select

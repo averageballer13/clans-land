@@ -46,11 +46,26 @@ async function connect() {
     }
   } else {
     const { PGlite } = await import('@electric-sql/pglite')
-    const { mkdirSync } = await import('node:fs')
+    const { mkdirSync, rmSync } = await import('node:fs')
     const dir = process.env.CLANS_DB_DIR || 'server/data/pg'
     mkdirSync(dir, { recursive: true })
-    const lite = new PGlite(dir)
-    await lite.waitReady
+
+    /* Killing the process mid-write leaves the local directory unopenable, and
+       it fails with a WebAssembly trace rather than anything readable. This is
+       the development convenience database, not the live world, so start a
+       fresh one rather than leaving someone stuck. */
+    let lite
+    try {
+      lite = new PGlite(dir)
+      await lite.waitReady
+    } catch (e) {
+      console.warn(`[clans] local database at ${dir} could not be opened, starting a fresh one`)
+      rmSync(dir, { recursive: true, force: true })
+      mkdirSync(dir, { recursive: true })
+      lite = new PGlite(dir)
+      await lite.waitReady
+    }
+
     driver = {
       query: (text, params) => lite.query(text, params ?? []),
       // The parameterised path speaks the extended protocol, which carries one
@@ -221,6 +236,14 @@ async function doMigrate() {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+  `)
+
+  /* Added after the first release. Postgres takes IF NOT EXISTS here, so this
+     is safe to run against a world that is already live. */
+  await exec(`
+    ALTER TABLE clans   ADD COLUMN IF NOT EXISTS motto     TEXT;
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS pnl_wei   TEXT NOT NULL DEFAULT '0';
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS trades    INTEGER NOT NULL DEFAULT 0;
   `)
 
   await run("INSERT INTO meta (key, value) VALUES ('version', '1') ON CONFLICT (key) DO NOTHING")

@@ -638,3 +638,79 @@ button.chainpill:hover { border-color: var(--acc); color: var(--acc); }
   font-family: var(--font-head); font-size: 12px; color: var(--acc2);
   border: 1px solid var(--line2); padding: 1px 5px;
 }
+
+/* ---- icons ---- */
+.icon { display: block; flex: none; }
+.btn .icon, .maprow .icon { display: inline-block; vertical-align: -2px; }
+.btn.openmap { display: inline-flex; align-items: center; gap: 7px; }
+
+/* ---- the map menu ---- */
+.mapwrap {
+  position: fixed; inset: 0; z-index: 88; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(4, 4, 6, 0.78);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  animation: fadein 0.22s ease;
+}
+.mapmenu {
+  width: min(940px, 100%); max-height: 100%; overflow-y: auto;
+  background: rgba(14, 16, 19, 0.97); border: 1px solid var(--line2); border-top: 2px solid var(--acc);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+  animation: sheetin 0.3s var(--ease);
+}
+.maphead {
+  position: relative; display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap; padding: 22px 26px 18px; border-bottom: 1px solid var(--line2);
+}
+.maphead h2 {
+  font-family: var(--font-display); font-style: italic; font-weight: 620;
+  font-size: 27px; line-height: 1; margin-top: 6px;
+}
+.mapstats { display: flex; gap: 26px; padding-right: 34px; }
+.mapstat { display: flex; flex-direction: column; gap: 2px; }
+.mapstat b { font-size: 20px; font-weight: 600; }
+
+.mapgroups { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0; }
+.mapgroup { padding: 18px 26px 20px; border-bottom: 1px solid var(--line2); }
+.mapgroup:nth-child(odd) { border-right: 1px solid var(--line2); }
+.mapgroup > .lbl { display: block; margin-bottom: 8px; }
+
+.maprow {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  padding: 11px 10px; border: 1px solid transparent;
+  transition: border-color 0.14s, background 0.14s, padding-left 0.18s var(--ease);
+}
+.maprow:hover { background: var(--acc-dim); border-color: var(--line2); padding-left: 15px; }
+.mapicon {
+  width: 38px; height: 38px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--line2); color: var(--acc);
+}
+.maprow:hover .mapicon { border-color: var(--acc); }
+.maptext { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.maptext b { font-family: var(--font-head); font-size: 14px; font-weight: 600; }
+.maptext span { color: var(--ink2); font-size: 12.5px; line-height: 1.4; }
+.mapmeta {
+  font-family: var(--font-label); font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink3); white-space: nowrap;
+}
+.mapfoot {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap; padding: 16px 26px;
+}
+
+@media (max-width: 820px) {
+  .mapgroups { grid-template-columns: 1fr; }
+  .mapgroup:nth-child(odd) { border-right: none; }
+  .mapstats { display: none; }
+  .btn.openmap span { display: none; }
+}
+
+/* ---- the mark ---- */
+.wm-mark { height: 22px; width: auto; display: block; flex: none; }
+.maphead h2 .wm-mark { display: inline-block; vertical-align: -4px; margin-right: 8px; }
+.howbrand .wm-mark { height: 20px; }
+
+/* ---- a clan's motto, as it flies on the flag ---- */
+.clanmotto {
+  font-family: var(--font-display); font-style: italic; font-size: 14.5px;
+  color: var(--acc2); margin-top: 6px;
+}

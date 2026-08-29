@@ -13,6 +13,11 @@ export const PAINTS = [
 
 export const landFor = (members) => BANNER_TILES + members * TILES_PER_MEMBER
 
+/* Wei arrives as a string because it does not fit a double. */
+export const weiToEth = (wei) => {
+  try { return Number(BigInt(wei ?? '0')) / 1e18 } catch { return 0 }
+}
+
 const DEG = Math.PI / 180
 export function greatCircle(la1, lo1, la2, lo2) {
   const p1 = la1 * DEG, p2 = la2 * DEG, dl = (lo2 - lo1) * DEG
@@ -102,16 +107,16 @@ export const addXp = (clanId, amount) =>
    Reading the world. One shape, served to everybody.
    ------------------------------------------------------------------ */
 export async function readWorld() {
-  const [clanRows, tiles, tileCount, wallets, warRows, bountyRows, eventRows, members, requests] =
+  const [clanRows, tiles, tileCount, walletRows, warRows, bountyRows, eventRows, members, requests] =
     await Promise.all([
       many('SELECT * FROM clans'),
       many('SELECT id, lat, lon, d_lat AS "dLat", d_lon AS "dLon", clan_id AS clan FROM tiles WHERE clan_id IS NOT NULL'),
       one('SELECT COUNT(*)::int AS n FROM tiles'),
-      one('SELECT COUNT(*)::int AS n FROM wallets'),
+      many('SELECT address, handle, pnl_wei, trades FROM wallets'),
       many('SELECT * FROM wars ORDER BY started_at DESC LIMIT 40'),
       many('SELECT * FROM bounties ORDER BY created_at DESC LIMIT 60'),
       many('SELECT * FROM events ORDER BY id DESC LIMIT 40'),
-      many(`SELECT m.address, m.clan_id, m.role, m.joined_at, w.handle
+      many(`SELECT m.address, m.clan_id, m.role, m.joined_at, w.handle, w.pnl_wei, w.trades
             FROM members m LEFT JOIN wallets w ON w.address = m.address
             ORDER BY m.joined_at`),
       many(`SELECT r.clan_id, r.address, r.created_at, w.handle
@@ -122,15 +127,22 @@ export async function readWorld() {
   const landBy = new Map()
   for (const t of tiles) landBy.set(t.clan, (landBy.get(t.clan) ?? 0) + 1)
 
+  /* Net ETH a wallet has made trading on Pons, read from the chain. It is what
+     ranks players, and a clan's number is simply its members added up. */
   const rosterBy = new Map()
+  const pnlBy = new Map()
   for (const m of members) {
     if (!rosterBy.has(m.clan_id)) rosterBy.set(m.clan_id, [])
+    const pnl = weiToEth(m.pnl_wei)
     rosterBy.get(m.clan_id).push({
       address: m.address,
       handle: m.handle ?? m.address,
       role: m.role,
       joinedAt: Number(m.joined_at),
+      pnl,
+      trades: m.trades ?? 0,
     })
+    pnlBy.set(m.clan_id, (pnlBy.get(m.clan_id) ?? 0) + pnl)
   }
 
   const requestsBy = new Map()
@@ -153,8 +165,10 @@ export async function readWorld() {
       entry: c.entry,
       region: c.region,
       lang: c.lang,
+      motto: c.motto ?? '',
       crest: typeof c.crest === 'string' ? JSON.parse(c.crest) : c.crest,
       paint: c.paint,
+      pnl: Number((pnlBy.get(c.id) ?? 0).toFixed(6)),
       cap: [c.cap_lat, c.cap_lon],
       trophies: c.trophies,
       xp: c.xp,
@@ -191,9 +205,22 @@ export async function readWorld() {
     id: Number(e.id), kind: e.kind, tag: e.tag, text: e.text, at: Number(e.created_at),
   }))
 
+  /* Every wallet that has ever signed in, ranked by what it has made. */
+  const clanOf = new Map(members.map((m) => [m.address, m.clan_id]))
+  const players = walletRows
+    .map((w) => ({
+      address: w.address,
+      handle: w.handle,
+      clan: clanOf.get(w.address) ?? null,
+      pnl: weiToEth(w.pnl_wei),
+      trades: w.trades ?? 0,
+    }))
+    .sort((a, b) => b.pnl - a.pnl)
+
   const totalTiles = Number(tileCount.n)
   return {
     clans,
+    players,
     tiles,
     wars,
     bounties,
@@ -203,7 +230,8 @@ export async function readWorld() {
       takenTiles: tiles.length,
       claimedPct: totalTiles ? Math.round((tiles.length / totalTiles) * 100) : 0,
       clans: clans.length,
-      wallets: Number(wallets.n),
+      wallets: walletRows.length,
+      traders: players.filter((p) => p.trades > 0).length,
       liveWars: wars.filter((w) => !w.settledAt).length,
       openBounties: bounties.filter((b) => b.state === 'open').length,
     },

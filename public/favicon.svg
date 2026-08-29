@@ -1,5 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" fill="#08090b"/>
-  <path d="M16 4 27 8v9c0 6.2-4.4 9.8-11 11C9.4 26.8 5 23.2 5 17V8L16 4Z" fill="none" stroke="#ff6a00" stroke-width="2"/>
-  <path d="M16 10.5 20.5 13v5c0 2.6-1.9 4.3-4.5 5-2.6-.7-4.5-2.4-4.5-5v-5L16 10.5Z" fill="#ff6a00"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Clans.team">
+  <rect width="64" height="64" fill="#08090b" />
+  <!-- The mark, scaled up and trimmed so it still reads in a browser tab. -->
+  <g fill="#F4F1EC" transform="translate(-13.6 -12.8) scale(0.104)">
+    <rect x="150" y="152" width="42" height="66" />
+    <rect x="308" y="152" width="42" height="66" />
+    <rect x="146" y="226" width="42" height="42" />
+    <rect x="312" y="226" width="42" height="42" />
+    <rect x="186" y="268" width="42" height="42" />
+    <rect x="272" y="268" width="42" height="42" />
+    <rect x="229" y="310" width="42" height="42" />
+  </g>
+  <rect x="20.8" y="3.2" width="10.4" height="4.6" fill="#3B2308" stroke="#E8791C" stroke-width="0.9" />
 </svg>
