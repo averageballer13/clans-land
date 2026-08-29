@@ -46,6 +46,12 @@ permissions, wars, bounties) against a running server:
 npm run test:api
 ```
 
+And the chain integration, read-only, against Robinhood Chain mainnet:
+
+```bash
+npm run test:chain
+```
+
 ## How the shared world works
 
 | Piece | What it does |
@@ -74,12 +80,30 @@ trophies scaled by the margin. A tie holds for the defender.
 an `EventSource` stream; clients refetch immediately, and fall back to polling if
 the stream cannot be held open.
 
-### What is not wired to the chain yet
+## On chain
 
-War scores are reported by each side rather than read from an indexer, and clan
-coins are registered by their Leader rather than discovered automatically. Both
-are marked as such in the interface. Everything else — identity, land, membership,
-levels, bounties — is real server state.
+Two things are read from Robinhood Chain itself, not typed in by anyone.
+
+**Launching a clan coin.** The Leader fills in a logo, a description and links,
+and the browser builds a `launchToken` call to the Pons V2 factory at
+`0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e`. The economics pin is read
+immediately before signing, and the whole call is simulated first — if it would
+revert, the wallet never opens, so a doomed launch costs nothing. The user signs
+it and pays the 0.0005 ETH fee plus gas; creator fees go to their own wallet.
+The server then pulls the receipt, finds the `TokenLaunched` event from the real
+factory, and refuses the coin unless that event names the same wallet as the
+deployer. Nothing is taken on trust.
+
+**War scores.** A war stores the block it started at. Every 15 seconds the server
+walks the new blocks and pulls `CurveBuy` and `CurveSell` logs filtered on the
+roster's addresses — both carry the trader in an indexed field, so one query
+covers a whole clan. A wallet's score is what it took out minus what it put in.
+Any contract can emit events with those names, so every emitting address is
+checked against a real `TokenLaunched` from the Pons factory before it counts.
+
+`npm run test:chain` proves all of it against the live chain: it finds a real
+launch, verifies it from its receipt, checks another wallet cannot claim it, and
+scans real traders for their net ETH.
 
 ## The globe
 
@@ -127,11 +151,14 @@ server/
   db.js                schema, tile grid, event log
   world.js             land, levels, war settlement, world shape
   index.js             auth, routes, SSE, static hosting in production
+  chain.js             launch verification and on-chain war scoring
 src/
   App.jsx              shell: top bar, menu, panel, hero, ticker, overlays
   lib/brand.js         chain / launchpad / wallet identity
   lib/crest.js         the crest vocabulary, mirrored by server validation
   lib/wallet.js        EIP-1193 connect, chain switch, signing
+  lib/pons.js          Pons V2 addresses and ABIs, verified on chain
+  lib/launch.js        builds, simulates and sends the clan coin launch
   lib/store.jsx        world state, session, actions, live updates
   ui/Crest.jsx         crest rendering
   globe/Globe.jsx      three.js scene, controls, picking, land layers
@@ -140,6 +167,7 @@ src/
 tools/
   build-earth.mjs      compacts Natural Earth GeoJSON into public/data/earth.json
   test-api.mjs         end-to-end game logic check with real signatures
+  test-chain.mjs       live read-only check of the Pons integration
   found-clan.mjs       found a clan from the command line
   capture-plugin.mjs   dev-only: POST a frame to /__shot to inspect the globe
 ```

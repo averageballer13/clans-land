@@ -8,6 +8,7 @@ import {
   readWorld, clanRow, grantTiles, reconcileLand, settleDueWars, newId,
   landFor, levelFor, addXp, PAINTS, CLAN_MAX,
 } from './world.js'
+import { verifyLaunch, scanTrades, head, toEth, CHAIN_ID } from './chain.js'
 
 const PORT = Number(process.env.PORT || 8787)
 const app = express()
@@ -275,25 +276,38 @@ app.post('/api/clans/:id/leave', auth, (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/clans/:id/coin', auth, (req, res) => {
+/* A clan coin is only real once the chain says so: the caller hands us the
+   launch transaction, we read the receipt, and we check the Pons factory
+   named that same wallet as the deployer. Nothing is taken on trust. */
+app.post('/api/clans/:id/coin', auth, async (req, res) => {
   const me = db.prepare('SELECT * FROM members WHERE address = ?').get(req.address)
   if (!me || me.clan_id !== req.params.id || me.role !== 'leader')
     return res.status(403).json({ error: 'leader only' })
-  const symbol = String(req.body?.symbol || '').toUpperCase()
-  const address = String(req.body?.address || '')
-  if (!/^[A-Z0-9]{2,10}$/.test(symbol)) return res.status(400).json({ error: 'bad symbol' })
-  if (!isAddress(address)) return res.status(400).json({ error: 'bad contract address' })
-  db.prepare('UPDATE clans SET coin_sym = ?, coin_addr = ? WHERE id = ?').run(symbol, getAddress(address), me.clan_id)
-  const clan = db.prepare('SELECT tag FROM clans WHERE id = ?').get(me.clan_id)
-  logEvent('coin', clan.tag, `${clan.tag} deployed $${symbol} on Pons`)
+
+  const clan = db.prepare('SELECT * FROM clans WHERE id = ?').get(me.clan_id)
+  if (clan.coin_addr) return res.status(409).json({ error: 'this clan already has a coin' })
+
+  const txHash = String(req.body?.txHash || '')
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return res.status(400).json({ error: 'bad transaction hash' })
+
+  let launch
+  try {
+    launch = await verifyLaunch(txHash, req.address)
+  } catch (e) {
+    return res.status(400).json({ error: String(e.message || e) })
+  }
+
+  db.prepare('UPDATE clans SET coin_sym = ?, coin_addr = ?, coin_curve = ?, coin_tx = ? WHERE id = ?')
+    .run(launch.symbol || clan.tag, launch.token, launch.curve, txHash, clan.id)
+  logEvent('coin', clan.tag, `${clan.tag} launched $${launch.symbol || clan.tag} on Pons`)
   broadcast()
-  res.json({ ok: true })
+  res.json({ ok: true, token: launch.token, curve: launch.curve })
 })
 
 /* ------------------------------------------------------------------
    Wars
    ------------------------------------------------------------------ */
-app.post('/api/wars', auth, (req, res) => {
+app.post('/api/wars', auth, async (req, res) => {
   const me = db.prepare('SELECT * FROM members WHERE address = ?').get(req.address)
   if (!me || !['leader', 'coleader'].includes(me.role))
     return res.status(403).json({ error: 'leader or co leader only' })
@@ -310,28 +324,15 @@ app.post('/api/wars', auth, (req, res) => {
   const hours = Math.min(48, Math.max(1, Number(req.body?.hours) || 24))
   const heldByB = db.prepare('SELECT COUNT(*) AS n FROM tiles WHERE clan_id = ?').get(target).n
   const id = newId()
-  db.prepare('INSERT INTO wars (id, a_id, b_id, stake, started_at, ends_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, me.clan_id, target, Math.floor(heldByB / 5), now(), now() + hours * 3600 * 1000)
+  let startBlock = null
+  try { startBlock = Number(await head()) } catch { /* scored from first scan instead */ }
+  db.prepare(`INSERT INTO wars (id, a_id, b_id, stake, started_at, ends_at, start_block, scan_block)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, me.clan_id, target, Math.floor(heldByB / 5), now(), now() + hours * 3600 * 1000, startBlock, startBlock)
   const a = db.prepare('SELECT tag FROM clans WHERE id = ?').get(me.clan_id)
   logEvent('war', a.tag, `${a.tag} declared war on ${b.tag} for ${hours}h`)
   broadcast()
   res.json({ id })
-})
-
-/* Scores are net ETH made on Pons during the window. Until an indexer is
-   wired up, a clan reports its own number and the other side can see it. */
-app.post('/api/wars/:id/score', auth, (req, res) => {
-  const me = db.prepare('SELECT * FROM members WHERE address = ?').get(req.address)
-  if (!me) return res.status(403).json({ error: 'join a clan first' })
-  const w = db.prepare('SELECT * FROM wars WHERE id = ?').get(req.params.id)
-  if (!w || w.settled_at) return res.status(404).json({ error: 'no live war' })
-  if (![w.a_id, w.b_id].includes(me.clan_id)) return res.status(403).json({ error: 'not your war' })
-  const score = Number(req.body?.score)
-  if (!Number.isFinite(score) || Math.abs(score) > 1e6) return res.status(400).json({ error: 'bad score' })
-  const col = me.clan_id === w.a_id ? 'score_a' : 'score_b'
-  db.prepare(`UPDATE wars SET ${col} = ? WHERE id = ?`).run(score, w.id)
-  broadcast()
-  res.json({ ok: true })
 })
 
 /* ------------------------------------------------------------------
@@ -386,6 +387,60 @@ if (existsSync(DIST)) {
   console.log('[clans] serving the built front end from dist/')
 }
 
-setInterval(() => { if (settleDueWars() > 0) broadcast() }, 15000).unref?.()
+/* ------------------------------------------------------------------
+   War scoring. Every tick we walk the new blocks since the last scan and
+   add up what each side's wallets actually made on Pons. Scanning forward
+   from a cursor keeps each pass small, whatever the chain's block rate.
+   ------------------------------------------------------------------ */
+let scanning = false
+async function scoreLiveWars() {
+  if (scanning) return false
+  scanning = true
+  let changed = false
+  try {
+    const live = db.prepare('SELECT * FROM wars WHERE settled_at IS NULL').all()
+    if (!live.length) return false
+    const to = await head()
+
+    for (const w of live) {
+      const from = BigInt(w.scan_block ?? w.start_block ?? Number(to))
+      if (w.scan_block == null) {
+        db.prepare('UPDATE wars SET start_block = COALESCE(start_block, ?), scan_block = ? WHERE id = ?')
+          .run(Number(to), Number(to), w.id)
+        continue
+      }
+      if (to <= from) continue
+
+      const side = (clanId) =>
+        db.prepare('SELECT address FROM members WHERE clan_id = ?').all(clanId).map((m) => m.address)
+      const a = side(w.a_id)
+      const b = side(w.b_id)
+      const wallets = [...a, ...b]
+      if (!wallets.length) {
+        db.prepare('UPDATE wars SET scan_block = ? WHERE id = ?').run(Number(to), w.id)
+        continue
+      }
+
+      const { totals, scannedTo } = await scanTrades(wallets, from, to)
+      const sum = (list) => list.reduce((n, addr) => n + (totals.get(addr.toLowerCase()) ?? 0n), 0n)
+      const weiA = BigInt(w.wei_a) + sum(a)
+      const weiB = BigInt(w.wei_b) + sum(b)
+
+      db.prepare('UPDATE wars SET wei_a = ?, wei_b = ?, score_a = ?, score_b = ?, scan_block = ? WHERE id = ?')
+        .run(weiA.toString(), weiB.toString(), toEth(weiA), toEth(weiB), Number(scannedTo), w.id)
+      if (weiA !== BigInt(w.wei_a) || weiB !== BigInt(w.wei_b)) changed = true
+    }
+  } catch (e) {
+    console.error('[clans] war scan failed:', e.message)
+  } finally {
+    scanning = false
+  }
+  return changed
+}
+
+setInterval(async () => {
+  const scored = await scoreLiveWars()
+  if (settleDueWars() > 0 || scored) broadcast()
+}, 15000).unref?.()
 
 app.listen(PORT, () => console.log(`[clans] listening on http://localhost:${PORT}`))

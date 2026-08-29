@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Crest from '../ui/Crest.jsx'
 import { useWorld } from '../lib/store.jsx'
 import { CHAIN, LAUNCHPAD, TOKEN, DEV_WALLET, shortAddr, WORLD_TILES, CLAN_MAX } from '../lib/brand.js'
 import { CREST_SHAPES, CREST_FIELDS, CREST_CHARGES, CREST_INKS, CREST_GROUNDS, randomCrest } from '../lib/crest.js'
+import { launchClanCoin, launchPreflight } from '../lib/launch.js'
 
 const eth = (n) => `${n > 0 ? '+' : ''}${Number(n).toFixed(3)} ${CHAIN.gas}`
 const cls = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'faint')
@@ -210,7 +211,7 @@ export function Leaderboard({ go }) {
 
 /* ================= Wars ================= */
 export function Wars({ go, toast }) {
-  const { wars, clanBy, stats, myClan, myRole, clans, declareWar, reportScore } = useWorld()
+  const { wars, clanBy, stats, myClan, myRole, clans, declareWar } = useWorld()
   const [busy, run] = useAction(toast)
   const [target, setTarget] = useState('')
   const [hours, setHours] = useState(24)
@@ -229,7 +230,8 @@ export function Wars({ go, toast }) {
       </div>
       <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.62, marginBottom: 14 }}>
         A war is one number a side: the net {CHAIN.gas} its member wallets make on {LAUNCHPAD.name} from
-        the moment of declaration. When the clock runs out the higher score wins, taking a fifth of the
+        the moment of declaration. Nobody reports it: every buy and sell is read straight off{' '}
+        {CHAIN.name} and added up. When the clock runs out the higher score wins, taking a fifth of the
         loser's land and trophies scaled by the margin. There is always a winner: a tie holds for the
         defender, and the attacker pays the land.
       </p>
@@ -290,20 +292,10 @@ export function Wars({ go, toast }) {
               <span className="lbl">{w.stake} tiles at stake</span>
               <span className="lbl on">Ends in {countdown(w.endsAt)}</span>
             </div>
-            {mine && (
-              <form
-                className="chainrow"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  const v = Number(new FormData(e.currentTarget).get('score'))
-                  run(() => reportScore(w.id, v), 'Score reported')
-                }}
-              >
-                <input name="score" type="number" step="0.001" placeholder={`your net ${CHAIN.gas}`}
-                  style={{ borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-head)', fontSize: 13, width: 130 }} />
-                <button className="btn small" disabled={busy}>Report score</button>
-              </form>
-            )}
+            <div className="chainrow">
+              <span className="feedpill live"><i className="dot" /> Read from {CHAIN.name}</span>
+              {mine && <span className="lbl">Trade on {LAUNCHPAD.name} to move your number</span>}
+            </div>
           </div>
         )
       })}
@@ -629,14 +621,111 @@ export function Found({ toast, capital, pickMode, onPickCapital, go }) {
   )
 }
 
+/* The clan coin, launched for real on Pons. The wallet signs it and pays
+   the fee; this site never touches the money and only records the receipt. */
+function LaunchCoin({ clan, toast }) {
+  const { registerCoin } = useWorld()
+  const [pre, setPre] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [step, setStep] = useState(null)
+  const [form, setForm] = useState({ logo: '', description: '', website: '', twitter: '', telegram: '' })
+
+  useEffect(() => {
+    let alive = true
+    launchPreflight().then((p) => alive && setPre(p)).catch(() => alive && setPre({ error: true }))
+    return () => { alive = false }
+  }, [])
+
+  const launch = async () => {
+    setBusy(true)
+    try {
+      setStep('Confirm in your wallet…')
+      const hash = await launchClanCoin({
+        clan,
+        logo: form.logo.trim(),
+        description: form.description.trim(),
+        links: { website: form.website.trim(), twitter: form.twitter.trim(), telegram: form.telegram.trim() },
+      })
+      setStep('Launched. Recording it…')
+      await registerCoin(clan.id, hash)
+      toast(`$${clan.tag} is live on ${LAUNCHPAD.name}`)
+      setOpen(false)
+    } catch (e) {
+      toast(e?.shortMessage || e?.message || 'the launch did not go through')
+    } finally {
+      setBusy(false)
+      setStep(null)
+    }
+  }
+
+  return (
+    <div className="coindeploy">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div>
+          <span className="lbl on">Launch the clan coin</span>
+          <div className="lbl" style={{ marginTop: 4 }}>
+            ${clan.tag} on {LAUNCHPAD.name}
+            {pre && !pre.error && ` · fee ${pre.feeEth} ${CHAIN.gas} · graduates at ${pre.graduationEth} ${CHAIN.gas}`}
+          </div>
+        </div>
+        <button className="btn small solid" disabled={busy || (pre && !pre.error && !pre.enabled)}
+          onClick={() => setOpen((o) => !o)}>
+          {open ? 'Close' : 'Launch'}
+        </button>
+      </div>
+
+      {pre?.error && <p className="empty-copy" style={{ marginTop: 8 }}>Cannot reach {CHAIN.name} right now.</p>}
+      {pre && !pre.error && !pre.enabled && (
+        <p className="empty-copy" style={{ marginTop: 8 }}>{LAUNCHPAD.name} has launching switched off at the moment.</p>
+      )}
+
+      {open && (
+        <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
+          <div className="kv-row" style={{ borderTop: '1px solid var(--line2)' }}>
+            <span className="lbl">Name / symbol</span>
+            <span className="num">{clan.name} · ${clan.tag}</span>
+          </div>
+          <label className="field"><span className="lbl">Logo URL</span>
+            <input value={form.logo} onChange={(e) => setForm({ ...form, logo: e.target.value })} placeholder="https://…" />
+          </label>
+          <label className="field"><span className="lbl">Description</span>
+            <textarea value={form.description} maxLength={280}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder={`${clan.name} — a clan on clans.land.`} />
+          </label>
+          <label className="field"><span className="lbl">Website</span>
+            <input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} placeholder="https://clans.land" />
+          </label>
+          <label className="field"><span className="lbl">X / Twitter</span>
+            <input value={form.twitter} onChange={(e) => setForm({ ...form, twitter: e.target.value })} placeholder="https://x.com/…" />
+          </label>
+          <label className="field"><span className="lbl">Telegram</span>
+            <input value={form.telegram} onChange={(e) => setForm({ ...form, telegram: e.target.value })} placeholder="https://t.me/…" />
+          </label>
+
+          <p className="empty-copy" style={{ margin: 0 }}>
+            You sign the transaction and you pay the {pre?.feeEth ?? '—'} {CHAIN.gas} fee plus gas.
+            Creator fees go to your wallet, not to us. We check the call would succeed before your
+            wallet opens, so a launch that cannot work never costs you anything.
+          </p>
+
+          <button className="btn solid" disabled={busy} onClick={launch}>
+            {busy ? (step || 'Working…') : `Launch $${clan.tag} on ${LAUNCHPAD.name}`}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ================= Clan detail ================= */
 export function ClanDetail({ id, toast, focus, go }) {
   const world = useWorld()
-  const { clanBy, me, myRole, signedIn, joinClan, leaveClan, setCoin, wars } = world
+  const { clanBy, me, myRole, signedIn, joinClan, leaveClan, wars } = world
   const c = clanBy(id)
   const [tab, setTab] = useState('roster')
   const [busy, run] = useAction(toast)
-  const [coin, setCoinForm] = useState({ symbol: '', address: '' })
   const mine = me?.clan?.id === id
   const history = useMemo(() => wars.filter((w) => w.a === id || w.b === id), [wars, id])
 
@@ -666,29 +755,17 @@ export function ClanDetail({ id, toast, focus, go }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
             <div>
               <div className="num" style={{ fontWeight: 600 }}>${c.coin.symbol}</div>
-              <span className="lbl">On {LAUNCHPAD.name} · {shortAddr(c.coin.address)}</span>
+              <span className="lbl">On {LAUNCHPAD.name} · {shortAddr(c.coin.address)}{c.coin.curve ? ` · curve ${shortAddr(c.coin.curve)}` : ''}</span>
             </div>
             <a className="btn small" href={`${CHAIN.explorer}/token/${c.coin.address}`} target="_blank" rel="noreferrer noopener">View</a>
           </div>
         </div>
       ) : mine && myRole === 'leader' ? (
-        <div className="coindeploy">
-          <span className="lbl on">Register your clan coin</span>
-          <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
-            <input placeholder="SYMBOL" value={coin.symbol}
-              onChange={(e) => setCoinForm({ ...coin, symbol: e.target.value.toUpperCase() })}
-              style={{ borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-head)', padding: '6px 0' }} />
-            <input placeholder="0x… contract on Robinhood Chain" value={coin.address}
-              onChange={(e) => setCoinForm({ ...coin, address: e.target.value })}
-              style={{ borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-head)', padding: '6px 0' }} />
-            <button className="btn small" disabled={busy}
-              onClick={() => run(() => setCoin(c.id, coin.symbol, coin.address), 'Coin registered')}>Register</button>
-          </div>
-        </div>
+        <LaunchCoin clan={c} toast={toast} />
       ) : (
         <div className="coindeploy">
           <span className="lbl on">No clan coin yet</span>
-          <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>The Leader can deploy one on {LAUNCHPAD.name} and register it here.</p>
+          <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>The Leader can launch one on {LAUNCHPAD.name} straight from this page.</p>
         </div>
       )}
 

@@ -10,7 +10,8 @@
     "build": "vite build",
     "start": "node server/index.js",
     "preview": "vite preview --port 4173",
-    "test:api": "node tools/test-api.mjs"
+    "test:api": "node tools/test-api.mjs",
+    "test:chain": "node tools/test-chain.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",

@@ -116,7 +116,7 @@ export function clanRow(c) {
       role: m.role,
       joinedAt: m.joined_at,
     })),
-    coin: c.coin_sym ? { symbol: c.coin_sym, address: c.coin_addr } : null,
+    coin: c.coin_addr ? { symbol: c.coin_sym, address: c.coin_addr, curve: c.coin_curve, tx: c.coin_tx } : null,
     foundedAt: c.founded_at,
   }
 }
@@ -135,6 +135,7 @@ export function readWorld() {
   const wars = db.prepare('SELECT * FROM wars ORDER BY started_at DESC LIMIT 40').all().map((w) => ({
     id: w.id, a: w.a_id, b: w.b_id, sa: w.score_a, sb: w.score_b, stake: w.stake,
     startedAt: w.started_at, endsAt: w.ends_at, settledAt: w.settled_at, winner: w.winner_id,
+    startBlock: w.start_block, scanBlock: w.scan_block,
   }))
 
   const bounties = db.prepare('SELECT * FROM bounties ORDER BY created_at DESC LIMIT 60').all().map((b) => ({

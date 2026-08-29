@@ -119,6 +119,21 @@ CREATE TABLE IF NOT EXISTS events (
 );
 `)
 
+/* Columns added after the first release. SQLite has no
+   ADD COLUMN IF NOT EXISTS, so check first. */
+function addColumn(table, name, decl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all()
+  if (cols.some((c) => c.name === name)) return
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${decl}`)
+}
+
+addColumn('clans', 'coin_curve', 'TEXT')
+addColumn('clans', 'coin_tx', 'TEXT')
+addColumn('wars', 'start_block', 'INTEGER')
+addColumn('wars', 'scan_block', 'INTEGER')
+addColumn('wars', 'wei_a', "TEXT NOT NULL DEFAULT '0'")
+addColumn('wars', 'wei_b', "TEXT NOT NULL DEFAULT '0'")
+
 export const now = () => Date.now()
 
 export function logEvent(kind, tag, text) {

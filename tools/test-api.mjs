@@ -167,8 +167,11 @@ check('the world grew since the start', worldAnon.stats.clans > before.stats.cla
   const again = await call('/api/wars', { method: 'POST', token: alice.token, body: { target: idB, hours: 1 } })
   check('a clan already at war cannot open a second front', again.status === 409, again.json.error)
 
-  const score = await call(`/api/wars/${war.json.id}/score`, { method: 'POST', token: alice.token, body: { score: 2.5 } })
-  check('a war score can be reported by its own side', score.status === 200, score.json.error)
+  const gone = await call(`/api/wars/${war.json.id}/score`, { method: 'POST', token: alice.token, body: { score: 999 } })
+  check('scores cannot be typed in any more', gone.status === 404, `HTTP ${gone.status}`)
+
+  const w = (await call('/api/world')).json.wars.find((x) => x.id === war.json.id)
+  check('a war records the block it started at', typeof w?.startBlock === 'number', `got ${w?.startBlock}`)
 }
 
 // Bounties
