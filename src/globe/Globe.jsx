@@ -341,7 +341,6 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
     /* ---- controls ---- */
     let rotY = -1.35, rotX = -0.22, dist = 3.05
     let targetY = rotY, targetX = rotX, targetDist = dist
-    let spin = 0.00035
     let dragging = false, lastX = 0, lastY = 0, moved = 0
 
     const onDown = (e) => { dragging = true; moved = 0; lastX = e.clientX; lastY = e.clientY; canvas.style.cursor = 'grabbing' }
@@ -412,8 +411,6 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
       targetY = -(lon + 180) * DEG - Math.PI / 2
       targetX = THREE.MathUtils.clamp(lat * DEG, -1.25, 1.25)
       targetDist = zoom
-      spin = 0
-      setTimeout(() => { spin = 0.00035 }, 4000)
     }
     api.current.setMarker = (ll) => {
       if (!ll) { pin.visible = false; return }
@@ -436,7 +433,8 @@ export default function Globe({ tiles = [], clans = [], onHover, onPick, onPickP
       last = now
       if (api.current.paused) return
 
-      if (!dragging) targetY += spin * dt
+      // The world holds still: it only turns when someone turns it, so a
+      // territory stays where you left it.
       rotY += (targetY - rotY) * 0.085
       rotX += (targetX - rotX) * 0.085
       dist += (targetDist - dist) * 0.075
