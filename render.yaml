@@ -10,8 +10,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: CLANS_DB
-        value: /var/data/clans.db
+      - key: CLANS_DB_DIR
+        value: /var/data/pg
       # Only needed if the site is served from another domain.
       - key: CLANS_ORIGINS
         value: https://www.clans.team,https://clans.team

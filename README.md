@@ -35,9 +35,9 @@ npm run build
 npm start
 ```
 
-The database is a single SQLite file at `server/data/clans.db` — back it up, and
-the world survives restarts. Override the location with `CLANS_DB`, the port with
-`PORT`.
+With no `DATABASE_URL` the game runs its own Postgres inside the process against
+`server/data/pg`, so there is nothing to install. Point `DATABASE_URL` at a hosted
+Postgres and it uses that instead. `PORT` moves the server.
 
 To check the whole game logic end to end (real signatures, land allocation,
 permissions, wars, bounties) against a running server:
@@ -55,44 +55,71 @@ npm run test:chain
 ## Putting it online
 
 The site alone is not the game. A static host serves the map and the panels, but
-founding a clan, taking land, joining, wars and coins all need the server, its
-database and its chain reader running somewhere. On a static host every `/api/`
-call returns 404 and the connect sheet says the game server is not answering.
+founding a clan, taking land, joining, wars and coins all need the server and its
+database. On a static host every `/api/` call returns 404 and the connect sheet
+says the game server is not answering.
 
-**One host, one port — simplest.** Deploy the whole repo to anything that runs
-Node with a persistent disk (Render, Railway, Fly, a VPS). It builds the site and
-serves it from the same process as the API, so there is no CORS and no second
-address to keep in step. `render.yaml` and the `Dockerfile` are ready:
+### On Vercel
+
+The API runs as one serverless function (`api/[...path].js`) that hands every
+request to the same Express app the local server runs, and the site is served as
+static files. `vercel.json` already wires both.
+
+One thing has to be added by hand: **a database**. A serverless platform keeps no
+disk between requests, so the world has to live somewhere else.
+
+1. In the Vercel dashboard open **Storage → Create Database → Postgres**, and
+   attach it to the project. That sets `DATABASE_URL` for you.
+2. Redeploy.
+
+That is the whole setup. The schema is created on the first request that needs
+it, and the 1200-tile grid is generated once and never regenerated, so the map
+survives every redeploy.
+
+Two details follow from being serverless, and the code handles both:
+
+- **No event stream.** A function cannot hold a connection open, so
+  `/api/health` reports `stream: false` and the browser polls `/api/version`
+  instead — one number, and it only refetches the world when that number moves.
+- **No background worker.** War scores are scanned off the back of requests
+  rather than on a timer, behind a lock in the database so only one instance
+  scans at a time.
+
+`npm run test:serverless` runs the app in exactly that mode and checks it.
+
+### On one long-lived host
+
+Anything that runs Node with a disk — Render, Railway, Fly, a VPS — serves the
+API and the site from one process on one port, holds event streams open, and
+scans the chain on a timer. `render.yaml` and the `Dockerfile` are ready:
 
 ```bash
 docker build -t clans .
 docker run -p 8787:8787 -v clans-world:/data clans
 ```
 
-Point `clans.team` at that service and you are done.
+With no `DATABASE_URL` the game runs its own Postgres in-process against
+`CLANS_DB_DIR`, so mount a volume there or the map resets on redeploy.
 
-**Site here, server there.** Keep the site on its current host and run only the
-API elsewhere. Two settings have to match:
+### Site here, server there
+
+To keep the site on one host and the API on another, two settings have to match:
 
 | Where | Setting | Value |
 | --- | --- | --- |
 | the site's build | `VITE_API_URL` | `https://api.clans.team` |
 | the server | `CLANS_ORIGINS` | `https://www.clans.team,https://clans.team` |
 
-`CLANS_ORIGINS` is a strict allow-list: an origin that is not in it gets no CORS
-headers at all. `GET /api/health` answers `{ ok: true, chain: 4663 }` and is what
-a host should watch.
-
-The world lives in one SQLite file (`CLANS_DB`, `server/data/clans.db` by
-default). Put it on a mounted disk or the map is wiped on every redeploy.
+`CLANS_ORIGINS` is a strict allow-list: an origin that is not on it gets no CORS
+headers at all. `GET /api/health` is what a host should watch.
 
 ## How the shared world works
 
 | Piece | What it does |
 | --- | --- |
-| `server/db.js` | SQLite schema and the 1200-tile grid, generated once and never regenerated so land ownership survives restarts |
+| `server/db.js` | Postgres schema and the 1200-tile grid, generated once and never regenerated so land ownership survives restarts |
 | `server/world.js` | Land allocation and release, level curve, war settlement, and the single `readWorld()` shape everyone is served |
-| `server/index.js` | Wallet auth, every mutation, and the SSE stream that tells clients to refetch |
+| `server/app.js` | Wallet auth, every mutation, the event stream, and the lazy chain scan |
 | `src/lib/store.jsx` | React context holding the world, the session, and every action |
 | `src/lib/wallet.js` | EIP-1193 connect, chain switch/add for Robinhood Chain, `personal_sign` |
 

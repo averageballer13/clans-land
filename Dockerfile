@@ -11,8 +11,10 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# The world lives here. Mount a volume on it or the map resets on redeploy.
-ENV CLANS_DB=/data/clans.db
+# With DATABASE_URL set the world lives in that hosted database and this
+# directory is unused. Without it the game runs its own Postgres in-process
+# against this folder, so mount a volume or the map resets on redeploy.
+ENV CLANS_DB_DIR=/data/pg
 VOLUME /data
 
 ENV PORT=8787

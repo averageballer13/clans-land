@@ -97,20 +97,48 @@ export function WorldProvider({ children, onToast }) {
   useEffect(() => { refresh(); refreshMe() }, [refresh, refreshMe])
   useEffect(() => { refreshMe() }, [token, refreshMe])
 
-  /* Live updates. The server pushes a version bump on every change and we
-     refetch, so two browsers never drift apart. Polling covers the case
-     where the stream cannot be held open. */
+  /* Live updates.
+
+     Where the server is a long-lived process it pushes a version down an
+     event stream. Where it is serverless it cannot hold one open, so we poll
+     a one-field version endpoint instead and only refetch the world when the
+     number actually moves. /api/health says which. */
   useEffect(() => {
     let source
-    try {
-      source = new EventSource(apiUrl('/api/stream'))
-      source.onmessage = () => refresh()
-    } catch { /* polling below covers it */ }
+    let poll
+    let stopped = false
+    let seen = 0
 
-    // Polling runs regardless: it is what brings the world back after the
-    // server was restarted, without anyone having to reload the page.
-    const poll = setInterval(refresh, 6000)
-    return () => { source?.close(); clearInterval(poll) }
+    const pull = async () => {
+      try {
+        const { v } = await call('/api/version')
+        if (v !== seen) { seen = v; await refresh() }
+        else setStatus('live')
+      } catch {
+        setStatus('offline')
+      }
+    }
+
+    ;(async () => {
+      let stream = false
+      try { stream = (await call('/api/health')).stream === true } catch { /* poll anyway */ }
+      if (stopped) return
+
+      if (stream) {
+        try {
+          source = new EventSource(apiUrl('/api/stream'))
+          source.onmessage = (e) => {
+            try { seen = JSON.parse(e.data).v } catch { /* still refresh */ }
+            refresh()
+          }
+        } catch { /* the poll below covers it */ }
+      }
+      // Polling runs either way: it is what brings the world back after the
+      // server restarts, without anyone reloading the page.
+      poll = setInterval(pull, stream ? 15000 : 5000)
+    })()
+
+    return () => { stopped = true; source?.close(); if (poll) clearInterval(poll) }
   }, [refresh])
 
   /* ---- session ---- */

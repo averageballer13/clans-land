@@ -1,184 +1,276 @@
-import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+/* The world's storage.
 
-const FILE = process.env.CLANS_DB || resolve('server/data/clans.db')
-mkdirSync(dirname(FILE), { recursive: true })
+   One dialect everywhere: Postgres. In production DATABASE_URL points at a
+   hosted database, which is what lets the game run on a platform with no disk
+   of its own. With no DATABASE_URL it falls back to PGlite — a real Postgres
+   running inside this process against a local folder — so the same SQL is
+   exercised in tests as in production, with nothing to install. */
 
-export const db = new DatabaseSync(FILE)
+let driver = null
 
-db.exec('PRAGMA journal_mode = WAL')
-db.exec('PRAGMA foreign_keys = ON')
+async function connect() {
+  if (driver) return driver
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS wallets (
-  address    TEXT PRIMARY KEY,          -- checksummed
-  handle     TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  seen_at    INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS nonces (
-  nonce      TEXT PRIMARY KEY,
-  address    TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-  token      TEXT PRIMARY KEY,
-  address    TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  FOREIGN KEY (address) REFERENCES wallets(address)
-);
-
-CREATE TABLE IF NOT EXISTS clans (
-  id         TEXT PRIMARY KEY,          -- lowercased tag
-  tag        TEXT NOT NULL UNIQUE,
-  name       TEXT NOT NULL,
-  entry      TEXT NOT NULL,             -- open | request | invite
-  region     TEXT NOT NULL,
-  lang       TEXT NOT NULL,
-  crest      TEXT NOT NULL,             -- json
-  paint      TEXT NOT NULL,
-  cap_lat    REAL NOT NULL,
-  cap_lon    REAL NOT NULL,
-  trophies   INTEGER NOT NULL DEFAULT 0,
-  xp         INTEGER NOT NULL DEFAULT 0,
-  wins       INTEGER NOT NULL DEFAULT 0,
-  losses     INTEGER NOT NULL DEFAULT 0,
-  coin_sym   TEXT,
-  coin_addr  TEXT,
-  founded_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS members (
-  address    TEXT PRIMARY KEY,          -- one clan per wallet
-  clan_id    TEXT NOT NULL,
-  role       TEXT NOT NULL,             -- leader | coleader | elder | member
-  joined_at  INTEGER NOT NULL,
-  FOREIGN KEY (clan_id) REFERENCES clans(id) ON DELETE CASCADE,
-  FOREIGN KEY (address) REFERENCES wallets(address)
-);
-
-CREATE TABLE IF NOT EXISTS requests (
-  clan_id    TEXT NOT NULL,
-  address    TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (clan_id, address),
-  FOREIGN KEY (clan_id) REFERENCES clans(id) ON DELETE CASCADE
-);
-
--- The shared map. Every row is one of the world's tiles; clan_id is the
--- single source of truth for who holds it.
-CREATE TABLE IF NOT EXISTS tiles (
-  id       INTEGER PRIMARY KEY,
-  lat      REAL NOT NULL,
-  lon      REAL NOT NULL,
-  d_lat    REAL NOT NULL,
-  d_lon    REAL NOT NULL,
-  clan_id  TEXT,
-  taken_at INTEGER,
-  FOREIGN KEY (clan_id) REFERENCES clans(id) ON DELETE SET NULL
-);
-CREATE INDEX IF NOT EXISTS tiles_clan ON tiles(clan_id);
-
-CREATE TABLE IF NOT EXISTS wars (
-  id          TEXT PRIMARY KEY,
-  a_id        TEXT NOT NULL,
-  b_id        TEXT NOT NULL,
-  score_a     REAL NOT NULL DEFAULT 0,
-  score_b     REAL NOT NULL DEFAULT 0,
-  stake       INTEGER NOT NULL,
-  started_at  INTEGER NOT NULL,
-  ends_at     INTEGER NOT NULL,
-  settled_at  INTEGER,
-  winner_id   TEXT,
-  FOREIGN KEY (a_id) REFERENCES clans(id) ON DELETE CASCADE,
-  FOREIGN KEY (b_id) REFERENCES clans(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS bounties (
-  id          TEXT PRIMARY KEY,
-  kind        TEXT NOT NULL,
-  title       TEXT NOT NULL,
-  reward      REAL NOT NULL,
-  clan_id     TEXT,
-  by_address  TEXT NOT NULL,
-  claimed_by  TEXT,
-  state       TEXT NOT NULL DEFAULT 'open',   -- open | claimed | done
-  created_at  INTEGER NOT NULL
-);
-
--- Append-only feed. Everyone reads the same history.
-CREATE TABLE IF NOT EXISTS events (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind       TEXT NOT NULL,
-  tag        TEXT,
-  text       TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-`)
-
-/* Columns added after the first release. SQLite has no
-   ADD COLUMN IF NOT EXISTS, so check first. */
-function addColumn(table, name, decl) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all()
-  if (cols.some((c) => c.name === name)) return
-  db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${decl}`)
+  if (process.env.DATABASE_URL) {
+    const { default: pg } = await import('pg')
+    // One connection per instance: a serverless platform runs many of them and
+    // the hosted pooler is what multiplexes underneath.
+    const pool = new pg.Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: Number(process.env.DB_POOL_MAX || 1),
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 10000,
+      ssl: process.env.DATABASE_URL.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
+    })
+    driver = {
+      query: (text, params) => pool.query(text, params),
+      // pg happily runs a whole script in one go when there are no parameters.
+      exec: (text) => pool.query(text),
+      kind: 'pg',
+    }
+  } else {
+    const { PGlite } = await import('@electric-sql/pglite')
+    const { mkdirSync } = await import('node:fs')
+    const dir = process.env.CLANS_DB_DIR || 'server/data/pg'
+    mkdirSync(dir, { recursive: true })
+    const lite = new PGlite(dir)
+    await lite.waitReady
+    driver = {
+      query: (text, params) => lite.query(text, params ?? []),
+      // The parameterised path speaks the extended protocol, which carries one
+      // statement at a time; exec is the multi-statement one.
+      exec: (text) => lite.exec(text),
+      kind: 'pglite',
+    }
+  }
+  return driver
 }
 
-addColumn('clans', 'coin_curve', 'TEXT')
-addColumn('clans', 'coin_tx', 'TEXT')
-addColumn('wars', 'start_block', 'INTEGER')
-addColumn('wars', 'scan_block', 'INTEGER')
-addColumn('wars', 'wei_a', "TEXT NOT NULL DEFAULT '0'")
-addColumn('wars', 'wei_b', "TEXT NOT NULL DEFAULT '0'")
+export async function query(text, params) {
+  const d = await connect()
+  return d.query(text, params)
+}
 
-/* Entry used to be open / request / invite. Two options are enough and
-   nobody could get into an invite-only clan anyway, so they collapse to
-   public and private. */
-db.exec("UPDATE clans SET entry = 'public' WHERE entry = 'open'")
-db.exec("UPDATE clans SET entry = 'private' WHERE entry IN ('request', 'invite')")
+/* A whole script, several statements at a time. Never takes parameters. */
+export async function exec(text) {
+  const d = await connect()
+  return d.exec(text)
+}
+export async function many(text, params) {
+  return (await query(text, params)).rows
+}
+export async function one(text, params) {
+  return (await query(text, params)).rows[0] ?? null
+}
+export async function run(text, params) {
+  const res = await query(text, params)
+  return res.rowCount ?? 0
+}
+
+/* Everything inside runs, or nothing does. */
+export async function tx(fn) {
+  await query('BEGIN')
+  try {
+    const out = await fn()
+    await query('COMMIT')
+    return out
+  } catch (e) {
+    await query('ROLLBACK')
+    throw e
+  }
+}
 
 export const now = () => Date.now()
 
-export function logEvent(kind, tag, text) {
-  db.prepare('INSERT INTO events (kind, tag, text, created_at) VALUES (?, ?, ?, ?)')
-    .run(kind, tag, text, now())
+export async function logEvent(kind, tag, text) {
+  await run('INSERT INTO events (kind, tag, text, created_at) VALUES ($1, $2, $3, $4)', [kind, tag, text, now()])
 }
 
-/* The tile grid is generated once, on first boot, and never regenerated —
-   tile ids are stable so land ownership survives restarts. */
-export function ensureGrid(rows = 30, target = 1200) {
-  const have = db.prepare('SELECT COUNT(*) AS n FROM tiles').get().n
+/* ------------------------------------------------------------------
+   Schema. Created on first use, safe to run again.
+   ------------------------------------------------------------------ */
+let ready = null
+export function migrate() {
+  if (!ready) ready = doMigrate()
+  return ready
+}
+
+async function doMigrate() {
+  await exec(`
+    CREATE TABLE IF NOT EXISTS wallets (
+      address    TEXT PRIMARY KEY,
+      handle     TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      seen_at    BIGINT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS nonces (
+      nonce      TEXT PRIMARY KEY,
+      address    TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token      TEXT PRIMARY KEY,
+      address    TEXT NOT NULL REFERENCES wallets(address),
+      created_at BIGINT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS clans (
+      id         TEXT PRIMARY KEY,
+      tag        TEXT NOT NULL UNIQUE,
+      name       TEXT NOT NULL,
+      entry      TEXT NOT NULL,
+      region     TEXT NOT NULL,
+      lang       TEXT NOT NULL,
+      crest      TEXT NOT NULL,
+      paint      TEXT NOT NULL,
+      cap_lat    DOUBLE PRECISION NOT NULL,
+      cap_lon    DOUBLE PRECISION NOT NULL,
+      trophies   INTEGER NOT NULL DEFAULT 0,
+      xp         INTEGER NOT NULL DEFAULT 0,
+      wins       INTEGER NOT NULL DEFAULT 0,
+      losses     INTEGER NOT NULL DEFAULT 0,
+      coin_sym   TEXT,
+      coin_addr  TEXT,
+      coin_curve TEXT,
+      coin_tx    TEXT,
+      founded_at BIGINT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS members (
+      address   TEXT PRIMARY KEY REFERENCES wallets(address),
+      clan_id   TEXT NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+      role      TEXT NOT NULL,
+      joined_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS members_clan ON members(clan_id);
+
+    CREATE TABLE IF NOT EXISTS requests (
+      clan_id    TEXT NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+      address    TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      PRIMARY KEY (clan_id, address)
+    );
+
+    CREATE TABLE IF NOT EXISTS tiles (
+      id       INTEGER PRIMARY KEY,
+      lat      DOUBLE PRECISION NOT NULL,
+      lon      DOUBLE PRECISION NOT NULL,
+      d_lat    DOUBLE PRECISION NOT NULL,
+      d_lon    DOUBLE PRECISION NOT NULL,
+      clan_id  TEXT REFERENCES clans(id) ON DELETE SET NULL,
+      taken_at BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS tiles_clan ON tiles(clan_id);
+
+    CREATE TABLE IF NOT EXISTS wars (
+      id          TEXT PRIMARY KEY,
+      a_id        TEXT NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+      b_id        TEXT NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+      score_a     DOUBLE PRECISION NOT NULL DEFAULT 0,
+      score_b     DOUBLE PRECISION NOT NULL DEFAULT 0,
+      wei_a       TEXT NOT NULL DEFAULT '0',
+      wei_b       TEXT NOT NULL DEFAULT '0',
+      stake       INTEGER NOT NULL,
+      started_at  BIGINT NOT NULL,
+      ends_at     BIGINT NOT NULL,
+      start_block BIGINT,
+      scan_block  BIGINT,
+      settled_at  BIGINT,
+      winner_id   TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS bounties (
+      id         TEXT PRIMARY KEY,
+      kind       TEXT NOT NULL,
+      title      TEXT NOT NULL,
+      reward     DOUBLE PRECISION NOT NULL,
+      clan_id    TEXT,
+      by_address TEXT NOT NULL,
+      claimed_by TEXT,
+      state      TEXT NOT NULL DEFAULT 'open',
+      created_at BIGINT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id         BIGSERIAL PRIMARY KEY,
+      kind       TEXT NOT NULL,
+      tag        TEXT,
+      text       TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `)
+
+  await run("INSERT INTO meta (key, value) VALUES ('version', '1') ON CONFLICT (key) DO NOTHING")
+  await ensureGrid()
+}
+
+export async function getMeta(key, fallback = null) {
+  const row = await one('SELECT value FROM meta WHERE key = $1', [key])
+  return row?.value ?? fallback
+}
+
+export async function setMeta(key, value) {
+  await run(
+    'INSERT INTO meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+    [key, String(value)]
+  )
+}
+
+/* Every write bumps this. Clients poll it, so one tiny read tells a browser
+   whether anything changed instead of shipping the whole world each time. */
+export async function bumpVersion() {
+  const row = await one(
+    `INSERT INTO meta (key, value) VALUES ('version', '1')
+     ON CONFLICT (key) DO UPDATE SET value = (meta.value::bigint + 1)::text
+     RETURNING value`
+  )
+  return Number(row.value)
+}
+
+/* The tile grid is generated once and never regenerated: ids are stable, so
+   land ownership survives every redeploy. Columns per row follow cos(lat) so
+   tiles stay roughly equal-area, and the remainder is handed out
+   largest-remainder-first, giving exactly `target` tiles rather than about
+   that many. */
+export async function ensureGrid(rows = 30, target = 1200) {
+  const have = Number((await one('SELECT COUNT(*)::int AS n FROM tiles')).n)
   if (have > 0) return have
 
-  // Columns per row follow cos(lat) so tiles stay roughly equal-area, and
-  // the leftovers are handed out largest-remainder-first so the world holds
-  // exactly `target` tiles rather than "about" that many.
   const lats = Array.from({ length: rows }, (_, r) => 90 - (r + 0.5) * (180 / rows))
   const weights = lats.map((lat) => Math.max(0.08, Math.cos((lat * Math.PI) / 180)))
   const sum = weights.reduce((a, b) => a + b, 0)
   const exact = weights.map((w) => (w / sum) * target)
   const cols = exact.map((n) => Math.max(3, Math.floor(n)))
   let short = target - cols.reduce((a, b) => a + b, 0)
-  const order = exact
-    .map((n, i) => ({ i, frac: n - Math.floor(n) }))
-    .sort((a, b) => b.frac - a.frac)
+  const order = exact.map((n, i) => ({ i, frac: n - Math.floor(n) })).sort((a, b) => b.frac - a.frac)
   for (let k = 0; short > 0; k++, short--) cols[order[k % rows].i]++
 
-  const insert = db.prepare('INSERT INTO tiles (lat, lon, d_lat, d_lon) VALUES (?, ?, ?, ?)')
-  db.exec('BEGIN')
-  try {
-    lats.forEach((lat, r) => {
-      for (let col = 0; col < cols[r]; col++) {
-        insert.run(lat, -180 + (col + 0.5) * (360 / cols[r]), 180 / rows, 360 / cols[r])
-      }
-    })
-    db.exec('COMMIT')
-  } catch (e) {
-    db.exec('ROLLBACK')
-    throw e
-  }
-  return db.prepare('SELECT COUNT(*) AS n FROM tiles').get().n
+  const rowsToInsert = []
+  let id = 0
+  lats.forEach((lat, r) => {
+    for (let col = 0; col < cols[r]; col++) {
+      rowsToInsert.push([id++, lat, -180 + (col + 0.5) * (360 / cols[r]), 180 / rows, 360 / cols[r]])
+    }
+  })
+
+  await tx(async () => {
+    // Chunked: one statement carrying 6000 parameters is past what drivers take.
+    for (let i = 0; i < rowsToInsert.length; i += 200) {
+      const chunk = rowsToInsert.slice(i, i + 200)
+      const values = chunk.map((_, n) => {
+        const b = n * 5
+        return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5})`
+      })
+      await run(`INSERT INTO tiles (id, lat, lon, d_lat, d_lon) VALUES ${values.join(',')}`, chunk.flat())
+    }
+  })
+
+  return Number((await one('SELECT COUNT(*)::int AS n FROM tiles')).n)
 }
