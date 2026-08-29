@@ -66,6 +66,18 @@ npm run test:chain
 and the server verifies the signature with viem. No password, no gas, no
 transaction, no custody. The address is your identity.
 
+**Public or private.** A clan is one or the other. Public and anyone walks in;
+private and the wallet asks, then the Leader, a Co Leader or an Elder approves or
+declines from the roster tab. Only the Leader hands out ranks, and handing the
+clan over demotes the old Leader to Co Leader in the same move.
+
+**Connecting.** Wallets are discovered over EIP-6963, so anything installed shows
+up with its own name and icon and an "Installed" badge — Rabby, Phantom, Brave,
+MetaMask, Trust and the rest. Wallets that are not installed are still listed with
+a link to get them, and there is a search box. Both terms boxes have to be ticked
+before a connect button unlocks. A browser stuck on `window.ethereum` alone still
+works.
+
 **Land is exclusive.** Tiles live in one table and are handed out inside a
 transaction, nearest-to-capital first, so two clans founded at the same instant
 can never be given the same ground. A capital cannot be planted on a tile another
